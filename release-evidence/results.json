@@ -1,0 +1,10 @@
+[
+  {
+    "check": "compas-forge_tests",
+    "exit_code": 0,
+    "rust_test_count": null,
+    "result_lines": [
+      "26 passed in 12.22s"
+    ]
+  }
+]

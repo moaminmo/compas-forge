@@ -1,0 +1,7 @@
+cff-version: 1.2.0
+message: "Please cite this software and record the exact commit or version used."
+type: software
+title: "COMPAS Forge: Mesh diagnostics and fabrication preflight"
+authors:
+  - name: "Mohammad Amin Moradi"
+license: MIT

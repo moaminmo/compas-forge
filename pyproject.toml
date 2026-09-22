@@ -1,0 +1,29 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "compas-forge"
+version = "0.3.0"
+description = "High-performance pre-flight validation and geometry QA engine for COMPAS framework"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "Mohammad Amin Moradi" }
+]
+dependencies = [
+    "compas>=2,<3",
+    "click>=8.1.0",
+    "rich>=13.7.0"
+]
+
+[project.scripts]
+compas-forge = "compas_forge.cli:main"
+
+[project.entry-points."compas.plugins"]
+compas_forge = "compas_forge.plugin"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "compas_forge._core"

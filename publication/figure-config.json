@@ -1,0 +1,30 @@
+{
+  "title": "COMPAS Forge",
+  "headline": "Inspect the mesh before the handoff",
+  "subtitle": "Topology diagnostics from the actual Rust-backed Python API",
+  "accent": "#45dcc5",
+  "cards": [
+    [
+      "3 → 0",
+      "Boundary edges: open / closed"
+    ],
+    [
+      "2 fixtures",
+      "One missing face / restored face"
+    ],
+    [
+      "Rust + Python",
+      "COMPAS mesh integration"
+    ]
+  ],
+  "summary": "The retained tetrahedron demo reports three boundary edges when one face is missing and zero when it is restored. These are actual API results, not a rendered mockup.",
+  "features": [
+    "Mesh topology diagnostics and conservative repair operations.",
+    "Rigid-motion collision queries, including rotation.",
+    "Python and CLI fabrication-profile reports with explicit units and limits."
+  ],
+  "command": "python examples/publication_demo.py",
+  "data": "demo.json",
+  "scope": "Surface diagnostics and geometric queries; profiles are screening rules, not material or machine certification.",
+  "post": "I built COMPAS Forge to make geometry checks a practical part of a computational-design workflow.\n\nThe Rust core connects to COMPAS through Python and a CLI, covering topology diagnostics, repair operations, moving-mesh queries and fabrication-profile reports. The attached figure comes from the actual API: a tetrahedron with one missing face reports three boundary edges; restoring that face reduces the count to zero.\n\nThe useful engineering detail is the explicit contract: units, validation errors and diagnostic results travel with the geometry. A passing surface check is not a manufacturing certificate.\n\nThe repository includes source, tests, a runnable headless example and the data behind this figure. I would welcome reproducible geometry cases from design and fabrication workflows.\n\n#ComputationalDesign #RustLang #COMPAS #ResearchSoftware"
+}

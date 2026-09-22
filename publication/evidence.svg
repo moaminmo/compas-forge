@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="864pt" height="486pt" viewBox="0 0 864 486" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 486 
+L 864 486 
+L 864 0 
+L 0 0 
+z
+" style="fill: #091622"/>
+  </g>
+  <g id="patch_2">
+   <path d="M 168.75 408.24 
+L 436.05 408.24 
+L 436.05 140.94 
+L 168.75 140.94 
+z
+" style="fill: #091622"/>
+  </g>
+  <g id="axes_1">
+   <g id="Poly3DCollection_1">
+    <path d="M 206.513776 303.312135 
+L 237.314965 282.801341 
+L 270.950002 318.538906 
+z
+" clip-path="url(#pbd38b5a71a)" style="fill: #ff977d; fill-opacity: 0.35; stroke: #ff977d; stroke-width: 1.4"/>
+    <path d="M 270.950002 318.538906 
+L 237.314965 282.801341 
+L 204.154581 223.369588 
+z
+" clip-path="url(#pbd38b5a71a)" style="fill: #ff977d; fill-opacity: 0.35; stroke: #ff977d; stroke-width: 1.4"/>
+    <path d="M 206.513776 303.312135 
+L 270.950002 318.538906 
+L 204.154581 223.369588 
+z
+" clip-path="url(#pbd38b5a71a)" style="fill: #ff977d; fill-opacity: 0.35; stroke: #ff977d; stroke-width: 1.4"/>
+   </g>
+   <g id="text_1">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #ff977d" x="208.021141" y="310.928259" transform="rotate(-0 208.021141 310.928259)">OPEN</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #45dcc5" x="320.831756" y="337.885857" transform="rotate(-0 320.831756 337.885857)">CLOSED</text>
+   </g>
+   <g id="Poly3DCollection_2">
+    <path d="M 317.894106 329.632155 
+L 346.231652 307.443742 
+L 387.758144 346.14156 
+z
+" clip-path="url(#pbd38b5a71a)" style="fill: #45dcc5; fill-opacity: 0.35; stroke: #45dcc5; stroke-width: 1.4"/>
+    <path d="M 346.231652 307.443742 
+L 317.894106 329.632155 
+L 318.187606 247.000345 
+z
+" clip-path="url(#pbd38b5a71a)" style="fill: #45dcc5; fill-opacity: 0.35; stroke: #45dcc5; stroke-width: 1.4"/>
+    <path d="M 387.758144 346.14156 
+L 346.231652 307.443742 
+L 318.187606 247.000345 
+z
+" clip-path="url(#pbd38b5a71a)" style="fill: #45dcc5; fill-opacity: 0.35; stroke: #45dcc5; stroke-width: 1.4"/>
+    <path d="M 317.894106 329.632155 
+L 387.758144 346.14156 
+L 318.187606 247.000345 
+z
+" clip-path="url(#pbd38b5a71a)" style="fill: #45dcc5; fill-opacity: 0.35; stroke: #45dcc5; stroke-width: 1.4"/>
+   </g>
+  </g>
+  <g id="patch_3">
+   <path d="M 604.8 231.822 
+L 825.12 231.822 
+Q 835.488 231.822 835.488 225.99 
+L 835.488 160.38 
+Q 835.488 154.548 825.12 154.548 
+L 604.8 154.548 
+Q 594.432 154.548 594.432 160.38 
+L 594.432 225.99 
+Q 594.432 231.822 604.8 231.822 
+z
+" style="fill: #152c3e; stroke: #284459; stroke-linejoin: miter"/>
+  </g>
+  <g id="patch_4">
+   <path d="M 604.8 316.872 
+L 825.12 316.872 
+Q 835.488 316.872 835.488 311.04 
+L 835.488 245.43 
+Q 835.488 239.598 825.12 239.598 
+L 604.8 239.598 
+Q 594.432 239.598 594.432 245.43 
+L 594.432 311.04 
+Q 594.432 316.872 604.8 316.872 
+z
+" style="fill: #152c3e; stroke: #284459; stroke-linejoin: miter"/>
+  </g>
+  <g id="patch_5">
+   <path d="M 604.8 401.922 
+L 825.12 401.922 
+Q 835.488 401.922 835.488 396.09 
+L 835.488 330.48 
+Q 835.488 324.648 825.12 324.648 
+L 604.8 324.648 
+Q 594.432 324.648 594.432 330.48 
+L 594.432 396.09 
+Q 594.432 401.922 604.8 401.922 
+z
+" style="fill: #152c3e; stroke: #284459; stroke-linejoin: miter"/>
+  </g>
+  <g id="text_3">
+   <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #45dcc5" x="47.52" y="38.88" transform="rotate(-0 47.52 38.88)">COMPAS FORGE</text>
+  </g>
+  <g id="text_4">
+   <text style="font-weight: 700; font-size: 25px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #eaf2f8" x="47.52" y="80.19" transform="rotate(-0 47.52 80.19)">Inspect the mesh before the handoff</text>
+  </g>
+  <g id="text_5">
+   <text style="font-size: 10px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #bfd0df" x="47.52" y="107.892" transform="rotate(-0 47.52 107.892)">Topology diagnostics from the actual Rust-backed Python API</text>
+  </g>
+  <g id="text_6">
+   <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #45dcc5" x="616.896" y="190.512" transform="rotate(-0 616.896 190.512)">3 → 0</text>
+  </g>
+  <g id="text_7">
+   <text style="font-size: 8.1px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #bfd0df" x="616.896" y="213.84" transform="rotate(-0 616.896 213.84)">Boundary edges: open / closed</text>
+  </g>
+  <g id="text_8">
+   <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #45dcc5" x="616.896" y="275.562" transform="rotate(-0 616.896 275.562)">2 fixtures</text>
+  </g>
+  <g id="text_9">
+   <text style="font-size: 8.1px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #bfd0df" x="616.896" y="298.89" transform="rotate(-0 616.896 298.89)">One missing face / restored face</text>
+  </g>
+  <g id="text_10">
+   <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #45dcc5" x="616.896" y="360.612" transform="rotate(-0 616.896 360.612)">Rust + Python</text>
+  </g>
+  <g id="text_11">
+   <text style="font-size: 8.1px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #bfd0df" x="616.896" y="383.94" transform="rotate(-0 616.896 383.94)">COMPAS mesh integration</text>
+  </g>
+  <g id="text_12">
+   <text style="font-size: 9px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #45dcc5" x="47.52" y="444.69" transform="rotate(-0 47.52 444.69)">HEADLESS DEMO  /  SOURCE + INPUTS + OUTPUTS INCLUDED</text>
+  </g>
+  <g id="text_13">
+   <text style="font-size: 8px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #a8bdce" x="47.52" y="463.644" transform="rotate(-0 47.52 463.644)">Recorded fixture results. See publication/README.md for reproduction and scope.</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pbd38b5a71a">
+   <rect x="168.75" y="140.94" width="267.3" height="267.3"/>
+  </clipPath>
+ </defs>
+</svg>

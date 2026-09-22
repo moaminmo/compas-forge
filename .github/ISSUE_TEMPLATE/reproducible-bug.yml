@@ -1,0 +1,24 @@
+name: Reproducible defect
+description: Report an implementation or documentation mismatch.
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Version and environment
+      description: Commit, operating system, runtime, host and native library versions.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Small shareable input, exact commands, units and settings. Remove confidential data.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and observed behaviour
+      description: Include logs and the reference calculation where relevant.
+    validations:
+      required: true

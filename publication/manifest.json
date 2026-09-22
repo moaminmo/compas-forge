@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "recorded_date": "2026-09-19",
+  "environment": "Windows x64",
+  "scope": "Surface diagnostics and geometric queries; profiles are screening rules, not material or machine certification.",
+  "reproduce": "python examples/publication_demo.py",
+  "figure_is_host_screenshot": false,
+  "sha256": {
+    "publication/demo.json": "ea99652a4b4220ea442ddeed08a36dec70a5c64076fc83e3c59c46acec5a34e4",
+    "publication/evidence.png": "0744f48bfb0cd4e20df95f03639d0bac26eafb025e6fb40383bf0052e0faed3d",
+    "publication/evidence.svg": "a50f89516dc52b17f4db970741dbd4efffa564222e5e35a2a63cad56165ab488",
+    "publication/figure-config.json": "684b21e0e87cbd19fe80db8abf740a46dd552e38f2c8df165a25a9fbdedeec52",
+    "publication/linkedin.md": "e767f6d724111e6c3a142cd6f8d8a599e074b8764c6d4425957db184e882463a",
+    "publication/README.md": "009e701ac175350e76fb81e128888c4a5859fc09bcff113d1fc5ef81aaf446bf",
+    "publication/render_figure.py": "0395dd9f99cd4e9bf8f4cf3370597b47c321fcce585b5c4ed4f709759882e85a",
+    "publication/requirements.txt": "b0aff417d12e0c140fecc7a5a7f88545960a1d6550109fefdc49110e04189292",
+    "examples/publication_demo.py": "74b875dbbd85afc11da3e13290a04bb129650b7a5aa03c79bfa1a0e3a69f822e"
+  }
+}
