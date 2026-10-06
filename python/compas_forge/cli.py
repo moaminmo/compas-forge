@@ -292,10 +292,19 @@ def swept(mesh_a_path, pose_a_start_str, pose_a_end_str, mesh_b_path, pose_b_sta
 
         table.add_row("Evaluation Time", f"{t_ms:.4f} ms")
         table.add_row("Collision Detected", "[red]TRUE[/red]" if result["has_collision"] else "[green]FALSE[/green]")
-        table.add_row("First Time of Impact (normalised 0–1)", f"{result['time_of_impact']:.6f}")
-        table.add_row("Impact Normal vector", str(result["normal_a"]))
-        table.add_row("Impact Point A (Witness)", str(result["witness_a"]))
-        table.add_row("Impact Point B (Witness)", str(result["witness_b"]))
+        table.add_row("Method", result["method"])
+        table.add_row("Temporal substeps", str(result["substeps"]))
+        toi = result["time_of_impact"]
+        impact = result["impact"]
+        table.add_row("First Time of Impact (normalised 0-1)", f"{toi:.6f}" if toi is not None else "N/A")
+        if impact is not None:
+            table.add_row("Solver status", impact["status"])
+            table.add_row("Converged", str(impact["converged"]))
+            table.add_row("Conservative estimate", str(impact["conservative"]))
+            table.add_row("Impact geometry reliable", str(impact["geometry_reliable"]))
+            table.add_row("Impact Normal A (world)", str(impact["normal_a_world"]))
+            table.add_row("Impact Point A (world)", str(impact["witness_a_world"]))
+            table.add_row("Impact Point B (world)", str(impact["witness_b_world"]))
 
         console.print(table)
         sys.exit(0)

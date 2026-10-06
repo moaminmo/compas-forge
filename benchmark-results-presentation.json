@@ -1,0 +1,111 @@
+{
+  "python": "3.14.2",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "forge_version": "0.4.0",
+  "repetitions": 7,
+  "warmup_calls": 1,
+  "build_profile": "Record the build command separately; runtime does not identify the Rust profile.",
+  "comparison": "No equivalent baseline or cross-machine speedup is asserted.",
+  "results": [
+    {
+      "grid_side": 20,
+      "faces": 400,
+      "vertices": 441,
+      "buffer_construction": {
+        "samples_ms": [
+          0.3406,
+          0.3362,
+          0.3693,
+          0.3677,
+          0.3769,
+          0.3496,
+          0.3334
+        ],
+        "median_ms": 0.3496,
+        "min_ms": 0.3334,
+        "max_ms": 0.3769
+      },
+      "rust_diagnostics_with_owned_copy_and_json": {
+        "samples_ms": [
+          2.4729,
+          1.6161,
+          0.9295,
+          1.0732,
+          0.8059,
+          1.0167,
+          0.7239
+        ],
+        "median_ms": 1.0167,
+        "min_ms": 0.7239,
+        "max_ms": 2.4729
+      }
+    },
+    {
+      "grid_side": 40,
+      "faces": 1600,
+      "vertices": 1681,
+      "buffer_construction": {
+        "samples_ms": [
+          1.4407,
+          1.3316,
+          1.3151,
+          1.3157,
+          1.3567,
+          1.3334,
+          1.3211
+        ],
+        "median_ms": 1.3316,
+        "min_ms": 1.3151,
+        "max_ms": 1.4407
+      },
+      "rust_diagnostics_with_owned_copy_and_json": {
+        "samples_ms": [
+          2.4811,
+          2.5524,
+          3.111,
+          2.415,
+          2.9534,
+          2.5021,
+          3.4349
+        ],
+        "median_ms": 2.5524,
+        "min_ms": 2.415,
+        "max_ms": 3.4349
+      }
+    },
+    {
+      "grid_side": 80,
+      "faces": 6400,
+      "vertices": 6561,
+      "buffer_construction": {
+        "samples_ms": [
+          5.4178,
+          5.9481,
+          6.2447,
+          6.5283,
+          5.5898,
+          5.7355,
+          5.5679
+        ],
+        "median_ms": 5.7355,
+        "min_ms": 5.4178,
+        "max_ms": 6.5283
+      },
+      "rust_diagnostics_with_owned_copy_and_json": {
+        "samples_ms": [
+          8.3458,
+          8.5241,
+          8.6882,
+          7.9764,
+          8.7941,
+          7.9973,
+          8.3544
+        ],
+        "median_ms": 8.3544,
+        "min_ms": 7.9764,
+        "max_ms": 8.7941
+      }
+    }
+  ]
+}

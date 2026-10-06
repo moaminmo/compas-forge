@@ -1,4 +1,4 @@
-"""Run the production mesh diagnostics and retain a reproducible result."""
+"""Run the packaged mesh diagnostics and retain a reproducible result."""
 import json
 from pathlib import Path
 from compas.datastructures import Mesh

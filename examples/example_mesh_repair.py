@@ -2,7 +2,6 @@ import time
 import math
 from compas.datastructures import Mesh
 import compas_forge
-from compas_forge.plugin import is_mesh_closed, is_mesh_manifold
 
 def generate_dirty_dome_structure(u_divs=40, v_divs=40):
     """
@@ -51,7 +50,7 @@ def run_example():
 
     # Execute the buffer-based repair pipeline
     t0 = time.perf_counter_ns()
-    fixed_mesh, report = compas_forge.fix_mesh_zero_copy(dirty_mesh)
+    fixed_mesh, report = compas_forge.repair_mesh(dirty_mesh)
     latency_ms = (time.perf_counter_ns() - t0) / 1_000_000.0
 
     print(f"\n[Execution Profiler] Processing Time: {latency_ms:.4f} ms")
@@ -61,8 +60,11 @@ def run_example():
     print(f"  Reconstructed Mesh Faces: {fixed_mesh.number_of_faces()}")
     
     # Verify that the reconstructed mesh is topologically manifold
-    print(f"  Is Manifold (Verified by Rust): {is_mesh_manifold(fixed_mesh)}")
-    print(f"  Is Closed / Watertight (Verified by Rust): {is_mesh_closed(fixed_mesh)}")
+    diagnostics = compas_forge.analyze_mesh(fixed_mesh)
+    is_manifold = not diagnostics["non_manifold_edges"] and not diagnostics["non_manifold_vertices"]
+    is_closed = diagnostics["face_count"] > 0 and diagnostics["boundary_edges_count"] == 0
+    print(f"  Is Manifold (Verified by Rust): {is_manifold}")
+    print(f"  Is Closed / Watertight (Verified by Rust): {is_closed}")
 
 if __name__ == "__main__":
     run_example()

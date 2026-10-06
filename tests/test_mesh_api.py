@@ -2,6 +2,7 @@ from array import array
 import json
 import pytest
 from compas.datastructures import Mesh
+from compas.geometry import Frame
 import compas_forge as forge
 
 def test_unknown_fabrication_profile_is_rejected(tmp_path):
@@ -25,6 +26,19 @@ def test_timber_mass_limit_is_explicit_and_applied(tmp_path):
 def triangle():
     return array('d', [0,0,0, 1,0,0, 0,1,0]), array('i', [0,1,2]), array('i', [0,3])
 
+
+def cube_mesh(size=1.0):
+    h = size / 2.0
+    vertices = [
+        [-h, -h, -h], [h, -h, -h], [h, h, -h], [-h, h, -h],
+        [-h, -h, h], [h, -h, h], [h, h, h], [-h, h, h],
+    ]
+    faces = [
+        [0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4],
+        [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7],
+    ]
+    return Mesh.from_vertices_and_faces(vertices, faces)
+
 def test_nonconsecutive_vertex_keys():
     mesh = Mesh()
     for key, point in zip([10,30,50], [(0,0,0),(1,0,0),(0,1,0)]):
@@ -33,6 +47,47 @@ def test_nonconsecutive_vertex_keys():
     v, i, o = forge.compas_mesh_to_buffers(mesh)
     assert list(i) == [0,1,2]
     assert json.loads(forge.validate_mesh_buffers(v,i,o))['is_valid']
+
+
+def test_compas_frame_pose_adapter_uses_xyzw_quaternion_order():
+    pose = forge.pose_from_frame(Frame.worldXY())
+    assert pose == pytest.approx([0, 0, 0, 0, 0, 0, 1])
+
+
+def test_frame_based_sweep_matches_array_based_sweep():
+    mesh = cube_mesh()
+    moving_start = Frame.worldXY()
+    moving_start.point.x = -2.0
+    moving_end = Frame.worldXY()
+    moving_end.point.x = 2.0
+    fixed = Frame.worldXY()
+    frame_result = forge.sweep_collision(
+        mesh, moving_start, moving_end, mesh, fixed, fixed
+    )
+    array_result = forge.check_swept_collision_zero_copy(
+        mesh,
+        forge.pose_from_frame(moving_start),
+        forge.pose_from_frame(moving_end),
+        mesh,
+        forge.pose_from_frame(fixed),
+        forge.pose_from_frame(fixed),
+    )
+    assert frame_result['has_collision'] == array_result['has_collision']
+    assert frame_result['time_of_impact'] == pytest.approx(array_result['time_of_impact'])
+
+
+def test_linear_sweep_preserves_world_velocity_for_rotated_frames():
+    import math
+
+    mesh = cube_mesh()
+    start = Frame.from_euler_angles([0, 0, math.pi / 2], point=[-2, 0, 0])
+    end = Frame.from_euler_angles([0, 0, math.pi / 2], point=[2, 0, 0])
+    fixed = Frame.from_euler_angles([0, 0, math.pi / 2], point=[0, 0, 0])
+    result = forge.sweep_collision(mesh, start, end, mesh, fixed, fixed)
+
+    assert result['has_collision']
+    assert result['method'] == 'linear'
+    assert result['time_of_impact'] == pytest.approx(0.25, abs=1e-5)
 
 @pytest.mark.parametrize('offsets', [[0,4], [0,-1], [1,3], [0,3,2], [], [0,2,3]])
 def test_bad_offsets_raise_value_error(offsets):
@@ -99,6 +154,49 @@ def test_linear_sweep_has_analytical_time_of_impact():
     result=forge.check_swept_collision_zero_copy(mesh,start,end,mesh,fixed,fixed)
     assert result['has_collision']
     assert result['time_of_impact']==pytest.approx(.5,abs=1e-5)
+    assert result['method'] == 'linear'
+    assert result['substeps'] == 1
+    assert result['impact']['status'] == 'Converged'
+    assert result['impact']['converged']
+    assert not result['impact']['conservative']
+    assert result['impact']['geometry_reliable']
+    assert result['impact']['witness_a_world'] == pytest.approx(
+        result['impact']['witness_b_world'], abs=1e-5
+    )
+
+
+def test_sweep_without_collision_has_no_synthetic_impact_data():
+    mesh = cube_mesh()
+    start = [-3, 0, 0, 0, 0, 0, 1]
+    end = [-2, 0, 0, 0, 0, 0, 1]
+    fixed = [3, 0, 0, 0, 0, 0, 1]
+    result = forge.check_swept_collision_zero_copy(mesh, start, end, mesh, fixed, fixed)
+    assert not result['has_collision']
+    assert result['time_of_impact'] is None
+    assert result['impact'] is None
+
+
+def test_sweep_rejects_non_unit_quaternion():
+    mesh = cube_mesh()
+    invalid_pose = [0, 0, 0, 0, 0, 0, 2]
+    identity = [0, 0, 0, 0, 0, 0, 1]
+    with pytest.raises(ValueError, match='unit quaternion'):
+        forge.check_swept_collision_zero_copy(
+            mesh, invalid_pose, identity, mesh, identity, identity
+        )
+
+
+def test_initial_overlap_marks_impact_geometry_unreliable():
+    mesh = cube_mesh()
+    identity = [0, 0, 0, 0, 0, 0, 1]
+    result = forge.check_swept_collision_zero_copy(
+        mesh, identity, identity, mesh, identity, identity
+    )
+    assert result['has_collision']
+    assert result['time_of_impact'] == pytest.approx(0.0)
+    assert result['method'] == 'initial_overlap'
+    assert result['impact']['status'] == 'PenetratingOrWithinTargetDist'
+    assert not result['impact']['geometry_reliable']
 
 
 def test_rotation_only_sweep_detects_intermediate_contact():
@@ -110,3 +208,29 @@ def test_rotation_only_sweep_detects_intermediate_contact():
     assert not forge.check_swept_collision_zero_copy(bar,end,end,obstacle,start,start)['has_collision']
     result=forge.check_swept_collision_zero_copy(bar,start,end,obstacle,start,start)
     assert result['has_collision'] and 0<result['time_of_impact']<1
+    assert result['method'] == 'nonlinear_substepped'
+    assert result['substeps'] > 1
+    assert result['impact']['witness_a_world'] == pytest.approx(
+        result['impact']['witness_b_world'], abs=1e-5
+    )
+
+
+def test_assembly_contact_order_is_deterministic():
+    def translated_cube(name, x):
+        mesh = cube_mesh()
+        mesh.transform(Frame([x, 0, 0], [1, 0, 0], [0, 1, 0]).to_transformation())
+        return name, mesh
+
+    assembly = dict([
+        translated_cube("block_2", 2.0),
+        translated_cube("block_0", 0.0),
+        translated_cube("block_1", 1.0),
+    ])
+    first = forge.assembly_contacts(assembly, tolerance=1e-6)
+    second = forge.assembly_contacts(assembly, tolerance=1e-6)
+
+    assert first == second
+    assert [(item["block_a"], item["block_b"]) for item in first] == [
+        ("block_0", "block_1"),
+        ("block_1", "block_2"),
+    ]

@@ -2,9 +2,9 @@ use rayon::prelude::*;
 use rstar::{RTreeObject, AABB as RStarAABB};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-/// Represents an Axis-Aligned Bounding Box (AABB) in 3D space
+/// Represents an axis-aligned bounding box (AABB) in 3D space.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct AABB {
+pub struct Aabb {
     pub min_x: f64,
     pub min_y: f64,
     pub min_z: f64,
@@ -13,7 +13,7 @@ pub struct AABB {
     pub max_z: f64,
 }
 
-impl AABB {
+impl Aabb {
     pub fn from_vertices(vertices: &[Vec<f64>]) -> Self {
         if vertices.is_empty() {
             return Self {
@@ -71,7 +71,7 @@ impl AABB {
 pub struct SpatialPart {
     pub id: usize,
     pub name: String,
-    pub bbox: AABB,
+    pub bbox: Aabb,
     pub vertices: Vec<Vec<f64>>,
     pub faces: Vec<Vec<usize>>,
 }
@@ -166,7 +166,7 @@ pub fn find_non_manifold_vertices(faces: &[Vec<usize>]) -> Vec<usize> {
     invalid
 }
 
-/// Computes the exact signed volume of an arbitrary closed triangle mesh.
+/// Computes signed volume from the mesh's oriented triangle decomposition.
 pub fn compute_mesh_volume(vertices: &[Vec<f64>], faces: &[Vec<usize>]) -> f64 {
     if vertices.is_empty() || faces.is_empty() {
         return 0.0;
@@ -332,7 +332,7 @@ pub fn compute_min_face_quality(vertices: &[Vec<f64>], faces: &[Vec<usize>]) -> 
         .unwrap_or(1.0)
 }
 
-/// Extracts boundary (naked) edges representing exact open topological bounds (holes).
+/// Extract boundary (naked) edges from edge-incidence counts.
 pub fn find_boundary_edges(faces: &[Vec<usize>]) -> Vec<(usize, usize)> {
     if faces.is_empty() {
         return Vec::new();
@@ -407,7 +407,7 @@ pub struct WeldAudit {
     pub coordinates: Vec<f64>,
 }
 
-/// SOTA Vertex Welding algorithm with exact topological lineage tracking.
+/// Weld vertices by six-decimal coordinate signatures and retain an audit trail.
 pub fn weld_vertices(
     vertices: &[Vec<f64>],
     faces: &[Vec<usize>],
@@ -461,7 +461,7 @@ pub struct FlipAudit {
     pub new_winding: Vec<usize>,
 }
 
-/// SOTA Dual-Graph BFS Normal Winding Unifier with exact geometric audit logging.
+/// Unify adjacent face winding with a dual-graph traversal and retain an audit trail.
 pub fn unify_winding_directions(mut faces: Vec<Vec<usize>>) -> (Vec<Vec<usize>>, Vec<FlipAudit>) {
     if faces.is_empty() {
         return (faces, Vec::new());
@@ -558,4 +558,64 @@ pub fn unify_winding_directions(mut faces: Vec<Vec<usize>>) -> (Vec<Vec<usize>>,
     }
 
     (faces, flip_audit_logs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn triangulates_concave_polygon_without_losing_area() {
+        let vertices = vec![
+            vec![0.0, 0.0, 0.0],
+            vec![3.0, 0.0, 0.0],
+            vec![3.0, 3.0, 0.0],
+            vec![2.0, 3.0, 0.0],
+            vec![2.0, 1.0, 0.0],
+            vec![1.0, 1.0, 0.0],
+            vec![1.0, 3.0, 0.0],
+            vec![0.0, 3.0, 0.0],
+        ];
+        let triangles = triangulate_face(&vertices, &(0..8).collect::<Vec<_>>());
+        let area: f64 = triangles
+            .iter()
+            .map(|triangle| {
+                let a = &vertices[triangle[0] as usize];
+                let b = &vertices[triangle[1] as usize];
+                let c = &vertices[triangle[2] as usize];
+                ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs() / 2.0
+            })
+            .sum();
+        assert!((area - 7.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn detects_open_and_closed_boundary_topology() {
+        assert_eq!(find_boundary_edges(&[vec![0, 1, 2]]).len(), 3);
+        let tetrahedron = vec![vec![0, 2, 1], vec![0, 1, 3], vec![1, 2, 3], vec![2, 0, 3]];
+        assert!(find_boundary_edges(&tetrahedron).is_empty());
+    }
+
+    #[test]
+    fn welding_remaps_faces_and_records_lineage() {
+        let vertices = vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![0.0, 0.0, 0.0],
+        ];
+        let (welded, faces, audit) = weld_vertices(&vertices, &[vec![3, 1, 2]]);
+        assert_eq!(welded.len(), 3);
+        assert_eq!(faces, vec![vec![0, 1, 2]]);
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].old_index, 3);
+        assert_eq!(audit[0].merged_into, 0);
+    }
+
+    #[test]
+    fn winding_unifier_flips_same_direction_neighbor() {
+        let (faces, audit) = unify_winding_directions(vec![vec![0, 1, 2], vec![0, 1, 3]]);
+        assert_eq!(audit.len(), 1);
+        assert_eq!(faces[1], vec![3, 1, 0]);
+    }
 }

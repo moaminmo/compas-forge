@@ -1,12 +1,14 @@
 # Implementation evidence
 
-Reviewed 2026-09-16. A passing build is distinguished from executed numerical tests and interactive host validation.
+Reviewed 2026-10-06. A passing build is distinguished from executed numerical tests and interactive host validation.
 
 | Capability | Implementation | Verification |
 |---|---|---|
 | Boundary and vertex-manifold diagnostics | [Code](src/geometry.rs) | [Evidence](tests/test_mesh_api.py): Open triangle, closed tetrahedron and disconnected vertex fans |
 | Concave polygon triangulation | [Code](src/geometry.rs) | [Evidence](tests/test_mesh_api.py): U-shaped face preserves analytical area |
-| Translation and rotation sweeps | [Code](src/lib.rs) | [Evidence](tests/test_mesh_api.py): Analytical translation TOI and rotation-only intermediate contact |
+| Translation and rotation sweeps | [Code](src/lib.rs) | [Evidence](tests/test_mesh_api.py): analytical translation TOI, initial overlap, no-hit semantics and rotation-only intermediate contact |
+| COMPAS FAB trajectory preflight | [Adapter](python/compas_forge/__init__.py) | [Evidence](tests/test_compas_fab_integration.py): UR5 model FK, clear endpoints and converged intermediate collision |
+| Deterministic assembly interfaces | [Code](src/lib.rs) | [Evidence](tests/test_mesh_api.py): repeated canonical contact ordering and analytical interface area |
 | Python / CLI validation | [Code](python/compas_forge) | [Evidence](tests/test_cli.py): Sparse vertex keys, malformed buffers and CLI input handling |
 
 ## Second-review corrections
@@ -19,4 +21,4 @@ Self-intersection, self-touching polygons, material behaviour and robot safety a
 
 ## Evidence scope
 
-26 Python tests. These checks cover the stated fixtures; they are not a proof of correctness on all inputs. No universal performance, state-of-the-art, production-readiness or scientific novelty claim is made. The repository includes CI configuration; remote CI execution has not been asserted.
+35 Python tests and 4 Rust unit tests on the local Windows/CPython 3.14 environment, plus Rust formatting and Clippy checks. These checks cover the stated fixtures; they are not a proof of correctness on all inputs. No universal performance, state-of-the-art, production-readiness or scientific novelty claim is made. The repository includes CI configuration; remote CI execution has not been asserted.

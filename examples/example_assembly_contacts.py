@@ -48,7 +48,7 @@ def run_example():
 
     # Execute the parallel Sutherland-Hodgman contact manifold solver
     t0 = time.perf_counter_ns()
-    contacts = compas_forge.compute_assembly_contacts_zero_copy(assembly, tolerance=0.005)
+    contacts = compas_forge.assembly_contacts(assembly, tolerance=0.005)
     latency_ms = (time.perf_counter_ns() - t0) / 1_000_000.0
 
     print(f"\n[Execution Profiler] Processing Time: {latency_ms:.4f} ms")
@@ -59,7 +59,7 @@ def run_example():
         expected_area = (4.5 - 4.0) * 1.0
         print(f"\nSample Interface Verification (voussoir_0 <-> voussoir_1):")
         print(f"  Touching Parts: {c0['block_a']} <-> {c0['block_b']}")
-        print(f"  Clipped Contact Area: {c0['area_m2']:.6f} m² (Expected: {expected_area:.6f})")
+        print(f"  Clipped Contact Area: {c0['area_m2']:.6f} m^2 (Expected: {expected_area:.6f})")
         print(f"  Contact Centroid: {c0['centroid']}")
         print(f"  Contact Normal: {c0['normal']}")
         print(f"  Polygon Vertices (3D): {len(c0['vertices_3d'])} Vertices")

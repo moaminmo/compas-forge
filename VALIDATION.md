@@ -1,12 +1,16 @@
 # Validation
 
-## Current review — 2026-09-16
+## Current review — 2026-10-06
 
-**Executed suite:** 26 Python tests.
+**Executed suite:** 35 Python tests, 4 Rust unit tests, `cargo fmt --check`, `cargo clippy -D warnings`, and release extension build.
 
 Reproduce with the build and test commands in [README.md](README.md). The local environment used Windows x64, CPython 3.14, Rust 1.96 and the installed .NET / native SDKs. Exact dependencies are recorded in package manifests and lockfiles. Native Python extensions were rebuilt in release mode before testing.
 
-Concave triangulation; vertex-link diagnostics; nonlinear rotational sweeps; regression coverage for analytical area and time of impact.
+Coverage includes concave triangulation, vertex-link diagnostics, analytical
+linear TOI, rotational sweeps, initial overlap, no-hit semantics, deterministic
+assembly contacts and a headless COMPAS FAB 1.1.4 UR5 trajectory using model
+forward kinematics. In that retained fixture, both endpoint checks are clear and
+the continuous sweep detects a converged intermediate collision.
 
 See [CLAIMS.md](CLAIMS.md) for direct implementation-to-test links.
 
@@ -14,7 +18,7 @@ See [CLAIMS.md](CLAIMS.md) for direct implementation-to-test links.
 
 Self-intersection, self-touching polygons, material behaviour and robot safety are outside the checks. Ear clipping assumes simple planar faces; contact clipping is intended for convex coplanar faces. A closed triangle surface can contain another without surface intersection, so clash queries are not a general solid-containment predicate. Profile values assume metres and are built-in heuristics, not manufacturing certification. Names containing `zero_copy` are compatibility APIs: input data is copied into owned Rust memory. No comparative speedup has been established.
 
-Interactive Rhino/Revit behaviour, where applicable, has not been exercised in this review. Record host version, input model, expected geometry, observed output and logs when performing integration tests. Report benchmark inputs, hardware, release profile, repetitions and raw measurements before making comparative performance claims.
+Interactive Rhino/Revit/Blender behaviour has not yet been exercised in this review. Record host version, input model, expected geometry, observed output and logs when performing integration tests. COMPAS FAB coverage is headless and uses model FK; it is not a ROS/MoveIt safety certification. Report benchmark inputs, hardware, release profile, repetitions and raw measurements before making comparative performance claims.
 
 <details>
 <summary>First-review historical record (superseded where the current review differs)</summary>

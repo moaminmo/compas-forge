@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 — presentation candidate, 2026-10-06
+
+- Added high-level, explicitly named APIs for mesh analysis, repair, fabrication
+  preflight, assembly contacts and frame-based swept collision.
+- Added a headless COMPAS FAB UR5 trajectory adapter and regression: endpoint
+  checks are clear while the continuous sweep detects and locates the
+  intermediate collision.
+- Split translation-only CCD onto Parry's linear shape cast and rotational CCD
+  into bounded angular substeps. Results now expose the method, substep count,
+  convergence status, conservative-estimate flag and local/world impact data.
+- Removed synthetic impact data from no-hit results and handle initial overlap
+  explicitly. Contact geometry is labelled reliable only on a converged solve.
+- Made assembly-contact output deterministic and canonicalised part-pair order.
+- Added Rust formatting, Clippy and unit-test gates to CI, alongside the Python
+  matrix and optional COMPAS FAB integration dependency.
+- Corrected example filenames and replaced compatibility `zero_copy` calls in
+  user-facing examples with the high-level APIs.
+
 ## Unreleased — source release review, 2026-09-18
 
 Report actual profile mass limits and reject unknown profile names. Added two regressions covering file and buffer APIs.

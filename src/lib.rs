@@ -13,14 +13,17 @@ mod parser;
 use geometry::{
     compute_max_planarity_deviation, compute_mesh_volume, compute_min_face_quality,
     count_unique_edges, find_boundary_edges, find_non_manifold_edges, triangulate_face,
-    unify_winding_directions, weld_vertices, SpatialPart, AABB,
+    unify_winding_directions, weld_vertices, Aabb, SpatialPart,
 };
 use parser::{CompasDataObject, ValidationResult};
 use rayon::prelude::*;
 use std::collections::HashSet;
 
 use parry3d_f64::math::{Pose, Rotation, Vector};
-use parry3d_f64::query::{cast_shapes_nonlinear, distance, NonlinearRigidMotion};
+use parry3d_f64::query::{
+    cast_shapes, cast_shapes_nonlinear, distance, NonlinearRigidMotion, ShapeCastOptions,
+    ShapeCastStatus,
+};
 use parry3d_f64::shape::TriMesh;
 
 static MESH_REGISTRY: OnceLock<Mutex<HashMap<String, TriMesh>>> = OnceLock::new();
@@ -65,7 +68,7 @@ struct PreflightResult {
     bounds_x_dim: f64,
     bounds_y_dim: f64,
     bounds_z_dim: f64,
-    bounding_box: crate::geometry::AABB,
+    bounding_box: crate::geometry::Aabb,
     vertices: Vec<Vec<f64>>,
     triangulated_faces: Vec<[u32; 3]>,
     euler_characteristic: i32,
@@ -86,10 +89,26 @@ struct AssemblyClashResult {
 #[derive(serde::Serialize)]
 struct SweptCollisionResult {
     has_collision: bool,
-    time_of_impact: f64,
-    witness_a: Vec<f64>,
-    witness_b: Vec<f64>,
-    normal_a: Vec<f64>,
+    time_of_impact: Option<f64>,
+    method: String,
+    substeps: usize,
+    impact: Option<SweptImpact>,
+}
+
+#[derive(serde::Serialize)]
+struct SweptImpact {
+    status: String,
+    converged: bool,
+    conservative: bool,
+    geometry_reliable: bool,
+    witness_a_local: Vec<f64>,
+    witness_b_local: Vec<f64>,
+    normal_a_local: Vec<f64>,
+    normal_b_local: Vec<f64>,
+    witness_a_world: Vec<f64>,
+    witness_b_world: Vec<f64>,
+    normal_a_world: Vec<f64>,
+    normal_b_world: Vec<f64>,
 }
 
 #[derive(serde::Serialize)]
@@ -205,7 +224,7 @@ fn validate_geometry(vertices: &[Vec<f64>], faces: &[Vec<usize>]) -> PyResult<()
 }
 
 fn validate_buffers(vertices: &[f64], indices: &[i32], offsets: &[i32]) -> PyResult<()> {
-    if vertices.len() % 3 != 0 || vertices.iter().any(|v| !v.is_finite()) {
+    if !vertices.len().is_multiple_of(3) || vertices.iter().any(|v| !v.is_finite()) {
         return Err(PyValueError::new_err(
             "Vertices must contain finite XYZ triples",
         ));
@@ -282,30 +301,104 @@ fn sweep_meshes(
     b0: &Pose,
     b1: &Pose,
 ) -> PyResult<SweptCollisionResult> {
-    let result = cast_shapes_nonlinear(
-        &rigid_motion(a0, a1),
-        a,
-        &rigid_motion(b0, b1),
-        b,
-        0.0,
-        1.0,
-        true,
-    )
-    .map_err(|e| PyValueError::new_err(format!("Unsupported nonlinear shape cast: {e:?}")))?;
+    let motion_a = rigid_motion(a0, a1);
+    let motion_b = rigid_motion(b0, b1);
+
+    let rotation_a = (a1.rotation * a0.rotation.conjugate())
+        .to_scaled_axis()
+        .length();
+    let rotation_b = (b1.rotation * b0.rotation.conjugate())
+        .to_scaled_axis()
+        .length();
+    let max_rotation = rotation_a.max(rotation_b);
+    let initial_distance = distance(a0, a, b0, b)
+        .map_err(|e| PyValueError::new_err(format!("Unsupported initial distance query: {e:?}")))?;
+
+    let (method, substeps, result) = if initial_distance <= 1e-12 {
+        let hit =
+            cast_shapes_nonlinear(&motion_a, a, &motion_b, b, 0.0, 1.0, true).map_err(|e| {
+                PyValueError::new_err(format!("Unsupported initial-overlap query: {e:?}"))
+            })?;
+        ("initial_overlap".to_string(), 1, hit)
+    } else if max_rotation <= 1e-10 {
+        let velocity_a_world = a1.translation - a0.translation;
+        let velocity_b_world = b1.translation - b0.translation;
+        // Parry expresses the first velocity in the first pose's local frame.
+        let velocity_a_local = a0.rotation.inverse() * velocity_a_world;
+        let options = ShapeCastOptions::with_max_time_of_impact(1.0);
+        let hit = cast_shapes(a0, velocity_a_local, a, b0, velocity_b_world, b, options)
+            .map_err(|e| PyValueError::new_err(format!("Unsupported linear shape cast: {e:?}")))?;
+        ("linear".to_string(), 1, hit)
+    } else {
+        // Keep each angular interval at or below 1.40625 degrees. Smaller intervals improve
+        // convergence for mesh-vs-mesh nonlinear casts while preserving the exact rigid motion.
+        let substeps = (max_rotation / (std::f64::consts::PI / 128.0))
+            .ceil()
+            .clamp(1.0, 256.0) as usize;
+        let mut first_hit = None;
+        for step in 0..substeps {
+            let start_time = step as f64 / substeps as f64;
+            let end_time = (step + 1) as f64 / substeps as f64;
+            let hit = cast_shapes_nonlinear(&motion_a, a, &motion_b, b, start_time, end_time, true)
+                .map_err(|e| {
+                    PyValueError::new_err(format!("Unsupported nonlinear shape cast: {e:?}"))
+                })?;
+            if hit.is_some() {
+                first_hit = hit;
+                break;
+            }
+        }
+        ("nonlinear_substepped".to_string(), substeps, first_hit)
+    };
+
     Ok(match result {
-        Some(hit) => SweptCollisionResult {
-            has_collision: true,
-            time_of_impact: hit.time_of_impact,
-            witness_a: hit.witness1.to_array().to_vec(),
-            witness_b: hit.witness2.to_array().to_vec(),
-            normal_a: hit.normal1.to_array().to_vec(),
-        },
+        Some(hit) => {
+            let pose_a_at_impact = motion_a.position_at_time(hit.time_of_impact);
+            let pose_b_at_impact = motion_b.position_at_time(hit.time_of_impact);
+            let converged = hit.status == ShapeCastStatus::Converged;
+            let conservative = matches!(
+                hit.status,
+                ShapeCastStatus::Failed | ShapeCastStatus::OutOfIterations
+            );
+            SweptCollisionResult {
+                has_collision: true,
+                time_of_impact: Some(hit.time_of_impact),
+                method,
+                substeps,
+                impact: Some(SweptImpact {
+                    status: format!("{:?}", hit.status),
+                    converged,
+                    conservative,
+                    // Deliberately strict: callers should only treat contact geometry from a
+                    // fully converged solve as presentation/measurement grade.
+                    geometry_reliable: converged,
+                    witness_a_local: hit.witness1.to_array().to_vec(),
+                    witness_b_local: hit.witness2.to_array().to_vec(),
+                    normal_a_local: hit.normal1.to_array().to_vec(),
+                    normal_b_local: hit.normal2.to_array().to_vec(),
+                    witness_a_world: (pose_a_at_impact.rotation * hit.witness1
+                        + pose_a_at_impact.translation)
+                        .to_array()
+                        .to_vec(),
+                    witness_b_world: (pose_b_at_impact.rotation * hit.witness2
+                        + pose_b_at_impact.translation)
+                        .to_array()
+                        .to_vec(),
+                    normal_a_world: (pose_a_at_impact.rotation * hit.normal1)
+                        .to_array()
+                        .to_vec(),
+                    normal_b_world: (pose_b_at_impact.rotation * hit.normal2)
+                        .to_array()
+                        .to_vec(),
+                }),
+            }
+        }
         None => SweptCollisionResult {
             has_collision: false,
-            time_of_impact: 1.0,
-            witness_a: vec![0.0; 3],
-            witness_b: vec![0.0; 3],
-            normal_a: vec![0.0; 3],
+            time_of_impact: None,
+            method,
+            substeps,
+            impact: None,
         },
     })
 }
@@ -389,7 +482,7 @@ fn polygon_area_and_centroid(poly: &[Point2D]) -> (f64, Point2D) {
         cx += (p1.x + p2.x) * factor;
         cy += (p1.y + p2.y) * factor;
     }
-    area = area / 2.0;
+    area /= 2.0;
     if area.abs() < 1e-9 {
         (0.0, Point2D { x: 0.0, y: 0.0 })
     } else {
@@ -441,7 +534,7 @@ fn validate_compas_json(json_str: &str) -> PyResult<String> {
     let duplicate_count = check_duplicates_parallel(&vertices);
     let non_manifold = find_non_manifold_edges(&faces);
     let non_manifold_vertices = geometry::find_non_manifold_vertices(&faces);
-    let bbox = AABB::from_vertices(&vertices);
+    let bbox = Aabb::from_vertices(&vertices);
 
     let result = ValidationResult {
         is_valid: duplicate_count == 0
@@ -517,7 +610,7 @@ fn validate_mesh_buffers(
     let duplicate_count = check_duplicates_parallel(&vertices);
     let non_manifold = find_non_manifold_edges(&faces);
     let non_manifold_vertices = geometry::find_non_manifold_vertices(&faces);
-    let bbox = AABB::from_vertices(&vertices);
+    let bbox = Aabb::from_vertices(&vertices);
 
     let result = ValidationResult {
         is_valid: duplicate_count == 0
@@ -541,6 +634,7 @@ fn validate_mesh_buffers(
 }
 
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 fn check_swept_collision(
     py: Python<'_>,
     v1_obj: &Bound<'_, PyAny>,
@@ -675,7 +769,7 @@ fn check_swept_collision_cached(
         ))
     })?;
 
-    let res = sweep_meshes(&mesh1, &p1_start, &p1_end, &mesh2, &p2_start, &p2_end)?;
+    let res = sweep_meshes(mesh1, &p1_start, &p1_end, mesh2, &p2_start, &p2_end)?;
 
     serde_json::to_string(&res)
         .map_err(|e| PyValueError::new_err(format!("Serialization error: {}", e)))
@@ -691,7 +785,7 @@ fn compute_assembly_contacts(
         name: String,
         vertices: Vec<Vector>,
         faces: Vec<Vec<usize>>,
-        bbox: AABB,
+        bbox: Aabb,
     }
 
     let mut meshes = Vec::with_capacity(assembly_list.len());
@@ -756,7 +850,7 @@ fn compute_assembly_contacts(
             faces.push(face);
         }
 
-        let bbox = AABB::from_vertices(&raw_v_vec);
+        let bbox = Aabb::from_vertices(&raw_v_vec);
 
         meshes.push(MeshReconstruction {
             name,
@@ -860,7 +954,18 @@ fn compute_assembly_contacts(
         }
     });
 
-    let results = contact_interfaces.into_inner().unwrap();
+    let mut results = contact_interfaces.into_inner().unwrap();
+    for contact in &mut results {
+        if contact.block_a > contact.block_b {
+            std::mem::swap(&mut contact.block_a, &mut contact.block_b);
+            contact.normal = [-contact.normal[0], -contact.normal[1], -contact.normal[2]];
+        }
+    }
+    results.sort_by(|a, b| {
+        a.block_a
+            .cmp(&b.block_a)
+            .then_with(|| a.block_b.cmp(&b.block_b))
+    });
     serde_json::to_string(&results).map_err(|err| {
         PyValueError::new_err(format!("Failed to serialize assembly contacts: {}", err))
     })
@@ -999,7 +1104,7 @@ fn run_preflight_json(json_str: &str, profile: &str) -> PyResult<String> {
     let (vertices, faces) = obj.data.get_vertices_and_faces();
     validate_geometry(&vertices, &faces)?;
 
-    let bbox = AABB::from_vertices(&vertices);
+    let bbox = Aabb::from_vertices(&vertices);
     let volume_m3 = compute_mesh_volume(&vertices, &faces);
     let boundary_edges = find_boundary_edges(&faces);
     let boundary_edges_count = boundary_edges.len();
@@ -1132,7 +1237,7 @@ fn run_preflight_buffers(
         faces.push(face);
     }
 
-    let bbox = AABB::from_vertices(&vertices);
+    let bbox = Aabb::from_vertices(&vertices);
     let volume_m3 = compute_mesh_volume(&vertices, &faces);
     let boundary_edges = find_boundary_edges(&faces);
     let boundary_edges_count = boundary_edges.len();
@@ -1235,7 +1340,7 @@ fn detect_clashes_json(items: Vec<(String, String)>, clearance_tolerance: f64) -
             Ok(SpatialPart {
                 id: idx,
                 name: name.clone(),
-                bbox: AABB::from_vertices(&vertices),
+                bbox: Aabb::from_vertices(&vertices),
                 vertices,
                 faces,
             })

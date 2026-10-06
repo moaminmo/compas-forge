@@ -1,8 +1,8 @@
-# Source release review — 19 September 2026
+# Source release review — 6 October 2026
 
 ## Corrections in this review
 
-Profile limits are explicit in native reports; CLI mass checks use the selected limit. Unknown profile names fail rather than silently selecting timber; `default` remains an explicit timber alias.
+Profile limits are explicit in native reports; CLI mass checks use the selected limit. Unknown profile names fail rather than silently selecting timber; `default` remains an explicit timber alias. The presentation candidate adds convergence-aware rigid-motion CCD, deterministic assembly interfaces and a tested COMPAS FAB trajectory adapter.
 
 ## Intended use
 
@@ -12,7 +12,7 @@ Profile limits are explicit in native reports; CLI mass checks use the selected 
 |---|---|
 | Input | COMPAS mesh or JSON; metres for fabrication profiles |
 | Output | Topology metrics, profile decisions, repair candidates and reports |
-| Executed local checks | 26 Python tests |
+| Executed local checks | 35 Python tests, 4 Rust tests, Rust fmt/Clippy, release build |
 | Implementation | [Source](src/geometry.rs) |
 | Reproducible evidence | [Tests](tests/test_mesh_api.py) |
 
@@ -24,7 +24,7 @@ Record the input checksum, source revision, dependency versions, host version, u
 
 ## Acceptance still required
 
-Self-intersection/solid containment and machine-specific manufacturing acceptance are not established.
+Self-intersection/solid containment and machine-specific manufacturing acceptance are not established. The COMPAS FAB adapter uses piecewise Cartesian sweeps between sampled FK frames; it is not a substitute for a certified robot safety system or full-link collision checker.
 
 No comparison in this review establishes universal optimality or state-of-the-art superiority. Algorithm choice is justified by the task and tested numerical behaviour. Independent benchmarks should compare the same inputs, correctness criteria and hardware, retaining raw timings and failure cases.
 

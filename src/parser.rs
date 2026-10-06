@@ -100,5 +100,5 @@ pub struct ValidationResult {
     pub non_manifold_vertices: Vec<usize>,
     pub duplicate_vertices: usize,
     pub boundary_edges_count: usize,
-    pub bounding_box: crate::geometry::AABB,
+    pub bounding_box: crate::geometry::Aabb,
 }
