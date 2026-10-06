@@ -114,7 +114,9 @@ pub fn triangulate_face<V: std::ops::Index<usize, Output = f64>>(
         .collect();
     let indices = earcutr::earcut(&coords, &[], 2).unwrap_or_default();
     indices
-        .chunks_exact(3)
+        .as_chunks::<3>()
+        .0
+        .iter()
         .map(|t| {
             let mut triangle = [face[t[0]] as u32, face[t[1]] as u32, face[t[2]] as u32];
             let a = &vertices[triangle[0] as usize];

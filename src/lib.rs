@@ -253,7 +253,7 @@ fn trimesh_from_buffers(
     validate_buffers(vertices_flat, face_indices, face_offsets)?;
     let vertex_count = vertices_flat.len() / 3;
     let mut vertices = Vec::with_capacity(vertex_count);
-    for chunk in vertices_flat.chunks_exact(3) {
+    for chunk in vertices_flat.as_chunks::<3>().0 {
         vertices.push(Vector::new(chunk[0], chunk[1], chunk[2]));
     }
 
@@ -587,7 +587,7 @@ fn validate_mesh_buffers(
     validate_buffers(vertices_flat, face_indices, face_offsets)?;
     let vertex_count = vertices_flat.len() / 3;
     let mut vertices = Vec::with_capacity(vertex_count);
-    for chunk in vertices_flat.chunks_exact(3) {
+    for chunk in vertices_flat.as_chunks::<3>().0 {
         vertices.push(vec![chunk[0], chunk[1], chunk[2]]);
     }
 
@@ -833,7 +833,7 @@ fn compute_assembly_contacts(
         let vertex_count = v_flat.len() / 3;
         let mut vertices = Vec::with_capacity(vertex_count);
         let mut raw_v_vec = Vec::with_capacity(vertex_count);
-        for chunk in v_flat.chunks_exact(3) {
+        for chunk in v_flat.as_chunks::<3>().0 {
             vertices.push(Vector::new(chunk[0], chunk[1], chunk[2]));
             raw_v_vec.push(vec![chunk[0], chunk[1], chunk[2]]);
         }
@@ -1040,7 +1040,7 @@ fn fix_mesh_buffers(
     validate_buffers(v_flat, idx, off)?;
     let vertex_count = v_flat.len() / 3;
     let mut vertices = Vec::with_capacity(vertex_count);
-    for chunk in v_flat.chunks_exact(3) {
+    for chunk in v_flat.as_chunks::<3>().0 {
         vertices.push(vec![chunk[0], chunk[1], chunk[2]]);
     }
 
@@ -1221,7 +1221,7 @@ fn run_preflight_buffers(
     validate_buffers(v_flat, idx, off)?;
     let vertex_count = v_flat.len() / 3;
     let mut vertices = Vec::with_capacity(vertex_count);
-    for chunk in v_flat.chunks_exact(3) {
+    for chunk in v_flat.as_chunks::<3>().0 {
         vertices.push(vec![chunk[0], chunk[1], chunk[2]]);
     }
 
