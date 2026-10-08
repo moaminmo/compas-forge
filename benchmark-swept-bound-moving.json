@@ -1,0 +1,48 @@
+{
+  "fixture": "moving_robot",
+  "scope": "geometry reuse versus fresh snapshot setup; not Rust versus another language",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "python": "3.14.2",
+  "compas": "2.15.1",
+  "compas_fab": "2.0.1",
+  "forge": "0.4.0",
+  "repetitions": 12,
+  "mesh_count": 7,
+  "preparation_ms": 295.8154,
+  "fresh_total_ms": [
+    6580.7861,
+    6574.8314,
+    6479.9176,
+    6728.8551,
+    6323.8741,
+    6174.6039,
+    6548.93,
+    6600.3298,
+    6552.668,
+    6734.6949,
+    6523.4902,
+    3902.9927
+  ],
+  "reused_query_ms": [
+    4973.0088,
+    4973.2854,
+    4932.2384,
+    4854.8596,
+    4959.8615,
+    4849.5855,
+    4969.4379,
+    4976.7599,
+    4789.9373,
+    4865.9537,
+    4714.7176,
+    4990.6505
+  ],
+  "median_fresh_ms": 6550.799,
+  "median_reused_ms": 4946.0499500000005,
+  "median_ratio": 1.3244506356026589,
+  "source_sha256": {
+    "python/compas_forge/cell.py": "624197faa5de66b0d1e73ba3f3d7958a1c141ce36aa79697453987af453d6d40",
+    "src/lib.rs": "6eb45160daf60a6b8f27d1692ad95041e1af3811ec5d54ac93c7fb9c797d7aa7",
+    "src/clearance.rs": "a23b40ee3a0016e19aca35915897eb6e11863736e0d303d21825b57bfee801e1"
+  }
+}

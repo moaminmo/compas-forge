@@ -1,6 +1,10 @@
 use rayon::prelude::*;
-use rstar::{RTreeObject, AABB as RStarAABB};
+use rstar::{RTree, RTreeObject, AABB as RStarAABB};
 use std::collections::{HashMap, HashSet, VecDeque};
+
+use parry3d_f64::math::{Pose, Vector};
+use parry3d_f64::query::intersection_test;
+use parry3d_f64::shape::Triangle;
 
 /// Represents an axis-aligned bounding box (AABB) in 3D space.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -87,6 +91,219 @@ impl RTreeObject for SpatialPart {
     }
 }
 
+#[derive(Clone)]
+struct TriangleRecord {
+    id: usize,
+    face_index: usize,
+    indices: [u32; 3],
+    envelope: RStarAABB<[f64; 3]>,
+}
+
+impl RTreeObject for TriangleRecord {
+    type Envelope = RStarAABB<[f64; 3]>;
+
+    fn envelope(&self) -> Self::Envelope {
+        self.envelope
+    }
+}
+
+// If nondegenerate triangles share only one vertex, intersection beyond that
+// vertex must reach an opposite edge of at least one triangle. Test those two
+// edges, avoiding the normal topological contact at the shared vertex.
+fn shared_vertex_overlap(a: &Triangle, b: &Triangle, shared: Vector) -> bool {
+    let edge_hits = |source: &Triangle, target: &Triangle| {
+        let points = [source.a, source.b, source.c];
+        let edge: Vec<_> = points
+            .iter()
+            .filter(|p| **p != shared)
+            .map(|p| *p - shared)
+            .collect();
+        if edge.len() != 2 {
+            return true;
+        }
+        let triangle = [target.a - shared, target.b - shared, target.c - shared];
+        let Some(normal) = (triangle[1] - triangle[0])
+            .cross(triangle[2] - triangle[0])
+            .try_normalize()
+        else {
+            return true;
+        };
+        let drop = (0..3)
+            .max_by(|&i, &j| normal[i].abs().total_cmp(&normal[j].abs()))
+            .unwrap();
+        let xy = |p: Vector| [p[(drop + 1) % 3], p[(drop + 2) % 3]];
+        let cross = |p: [f64; 2], q: [f64; 2], r: [f64; 2]| {
+            (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+        };
+        let tri = triangle.map(xy);
+        let contains = |p| {
+            let signs = [
+                cross(tri[0], tri[1], p),
+                cross(tri[1], tri[2], p),
+                cross(tri[2], tri[0], p),
+            ];
+            signs.iter().all(|v| *v >= 0.0) || signs.iter().all(|v| *v <= 0.0)
+        };
+        let distances = edge
+            .iter()
+            .map(|p| normal.dot(*p - triangle[0]))
+            .collect::<Vec<_>>();
+        let tolerance = 64.0 * f64::EPSILON * edge[0].length().max(edge[1].length());
+        if distances.iter().all(|v| v.abs() <= tolerance) {
+            let (p, q) = (xy(edge[0]), xy(edge[1]));
+            if contains(p) || contains(q) {
+                return true;
+            }
+            for i in 0..3 {
+                let (r, s) = (tri[i], tri[(i + 1) % 3]);
+                // Bounding boxes plus orientation straddling also handles
+                // collinear overlapping edges (without multiplying signs).
+                if (0..2)
+                    .any(|k| p[k].max(q[k]) < r[k].min(s[k]) || r[k].max(s[k]) < p[k].min(q[k]))
+                {
+                    continue;
+                }
+                let opposite = |x: f64, y: f64| (x <= 0.0 && y >= 0.0) || (y <= 0.0 && x >= 0.0);
+                if opposite(cross(p, q, r), cross(p, q, s))
+                    && opposite(cross(r, s, p), cross(r, s, q))
+                {
+                    return true;
+                }
+            }
+            false
+        } else if (distances[0] > 0.0 && distances[1] > 0.0)
+            || (distances[0] < 0.0 && distances[1] < 0.0)
+        {
+            false
+        } else {
+            let t = distances[0] / (distances[0] - distances[1]);
+            contains(xy(edge[0] + (edge[1] - edge[0]) * t))
+        }
+    };
+    edge_hits(a, b) || edge_hits(b, a)
+}
+
+/// Detect non-adjacent intersections and overlap beyond shared edges/vertices.
+/// This uses floating-point Parry predicates and is a diagnostic, not an exact
+/// symbolic-geometry proof.
+pub fn find_self_intersections(vertices: &[Vec<f64>], faces: &[Vec<usize>]) -> Vec<(usize, usize)> {
+    let mut records = Vec::new();
+    for (face_index, face) in faces.iter().enumerate() {
+        for indices in triangulate_face(vertices, face) {
+            let points = indices.map(|index| &vertices[index as usize]);
+            let min = [
+                points
+                    .iter()
+                    .map(|point| point[0])
+                    .fold(f64::INFINITY, f64::min),
+                points
+                    .iter()
+                    .map(|point| point[1])
+                    .fold(f64::INFINITY, f64::min),
+                points
+                    .iter()
+                    .map(|point| point[2])
+                    .fold(f64::INFINITY, f64::min),
+            ];
+            let max = [
+                points
+                    .iter()
+                    .map(|point| point[0])
+                    .fold(f64::NEG_INFINITY, f64::max),
+                points
+                    .iter()
+                    .map(|point| point[1])
+                    .fold(f64::NEG_INFINITY, f64::max),
+                points
+                    .iter()
+                    .map(|point| point[2])
+                    .fold(f64::NEG_INFINITY, f64::max),
+            ];
+            records.push(TriangleRecord {
+                id: records.len(),
+                face_index,
+                indices,
+                envelope: RStarAABB::from_corners(min, max),
+            });
+        }
+    }
+
+    let tree = RTree::bulk_load(records.clone());
+    let identity = Pose::identity();
+    let mut intersections = HashSet::new();
+    for first in &records {
+        for second in tree.locate_in_envelope_intersecting(first.envelope()) {
+            if first.id >= second.id || first.face_index == second.face_index {
+                continue;
+            }
+            let shared: Vec<_> = first
+                .indices
+                .iter()
+                .copied()
+                .filter(|index| second.indices.contains(index))
+                .collect();
+            let triangle = |record: &TriangleRecord| {
+                let point = |index: u32| {
+                    let value = &vertices[index as usize];
+                    Vector::new(value[0], value[1], value[2])
+                };
+                Triangle::new(
+                    point(record.indices[0]),
+                    point(record.indices[1]),
+                    point(record.indices[2]),
+                )
+            };
+            let intersects = match shared.len() {
+                0 => intersection_test(&identity, &triangle(first), &identity, &triangle(second))
+                    .is_ok_and(|result| result.intersecting),
+                2 => {
+                    // Two nondegenerate triangles sharing an edge can overlap
+                    // beyond it only when coplanar. Same-side perpendiculars
+                    // detect a foldover; opposite sides are normal adjacency.
+                    // Near-coplanar same-side pairs are conservatively flagged.
+                    let point = |i: u32| {
+                        let p = &vertices[i as usize];
+                        Vector::new(p[0], p[1], p[2])
+                    };
+                    let origin = point(shared[0]);
+                    let edge = point(shared[1]) - origin;
+                    let tip = |r: &TriangleRecord| {
+                        point(*r.indices.iter().find(|i| !shared.contains(i)).unwrap()) - origin
+                    };
+                    let a = edge.cross(tip(first));
+                    let b = edge.cross(tip(second));
+                    match (a.try_normalize(), b.try_normalize()) {
+                        (Some(a), Some(b)) => {
+                            a.dot(b) > 0.0 && a.cross(b).length() <= 64.0 * f64::EPSILON
+                        }
+                        _ => true, // Degenerate shared-edge pair is not a valid shell.
+                    }
+                }
+                3 => true, // Duplicate triangle, including reverse winding.
+                1 => {
+                    let p = &vertices[shared[0] as usize];
+                    shared_vertex_overlap(
+                        &triangle(first),
+                        &triangle(second),
+                        Vector::new(p[0], p[1], p[2]),
+                    )
+                }
+                _ => unreachable!(),
+            };
+            if intersects {
+                intersections.insert(if first.face_index < second.face_index {
+                    (first.face_index, second.face_index)
+                } else {
+                    (second.face_index, first.face_index)
+                });
+            }
+        }
+    }
+    let mut intersections: Vec<_> = intersections.into_iter().collect();
+    intersections.sort_unstable();
+    intersections
+}
+
 /// Project a simple planar polygon onto its dominant plane and triangulate concavities.
 pub fn triangulate_face<V: std::ops::Index<usize, Output = f64>>(
     vertices: &[V],
@@ -168,32 +385,144 @@ pub fn find_non_manifold_vertices(faces: &[Vec<usize>]) -> Vec<usize> {
     invalid
 }
 
-/// Computes signed volume from the mesh's oriented triangle decomposition.
+fn face_components(faces: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    let mut edge_to_faces: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+    for (face_index, face) in faces.iter().enumerate() {
+        for i in 0..face.len() {
+            let a = face[i];
+            let b = face[(i + 1) % face.len()];
+            edge_to_faces
+                .entry(if a < b { (a, b) } else { (b, a) })
+                .or_default()
+                .push(face_index);
+        }
+    }
+
+    let mut adjacency = vec![Vec::new(); faces.len()];
+    for incident in edge_to_faces.values() {
+        for &a in incident {
+            for &b in incident {
+                if a != b {
+                    adjacency[a].push(b);
+                }
+            }
+        }
+    }
+
+    let mut visited = vec![false; faces.len()];
+    let mut components = Vec::new();
+    for start in 0..faces.len() {
+        if visited[start] {
+            continue;
+        }
+        visited[start] = true;
+        let mut stack = vec![start];
+        let mut component = Vec::new();
+        while let Some(face_index) = stack.pop() {
+            component.push(face_index);
+            for &neighbor in &adjacency[face_index] {
+                if !visited[neighbor] {
+                    visited[neighbor] = true;
+                    stack.push(neighbor);
+                }
+            }
+        }
+        components.push(component);
+    }
+    components
+}
+
+/// Count edge-connected surface components.
+pub fn count_face_components(faces: &[Vec<usize>]) -> usize {
+    face_components(faces).len()
+}
+
+/// Check that every shared manifold edge is traversed in opposite directions.
+pub fn has_consistent_winding(faces: &[Vec<usize>]) -> bool {
+    let mut directions: HashMap<(usize, usize), Vec<bool>> = HashMap::new();
+    for face in faces {
+        for i in 0..face.len() {
+            let a = face[i];
+            let b = face[(i + 1) % face.len()];
+            let key = if a < b { (a, b) } else { (b, a) };
+            directions.entry(key).or_default().push(a < b);
+        }
+    }
+    directions
+        .values()
+        .all(|uses| uses.len() != 2 || uses[0] != uses[1])
+}
+
+/// Count faces that cannot produce a non-degenerate triangulation.
+pub fn count_degenerate_faces(
+    vertices: &[Vec<f64>],
+    faces: &[Vec<usize>],
+    area_tolerance: f64,
+) -> usize {
+    faces
+        .iter()
+        .filter(|face| {
+            if face.iter().copied().collect::<HashSet<_>>().len() < 3 {
+                return true;
+            }
+            let triangles = triangulate_face(vertices, face);
+            triangles.is_empty()
+                || triangles.iter().any(|tri| {
+                    let a = &vertices[tri[0] as usize];
+                    let b = &vertices[tri[1] as usize];
+                    let c = &vertices[tri[2] as usize];
+                    let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                    let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                    let cross = [
+                        ab[1] * ac[2] - ab[2] * ac[1],
+                        ab[2] * ac[0] - ab[0] * ac[2],
+                        ab[0] * ac[1] - ab[1] * ac[0],
+                    ];
+                    0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt()
+                        <= area_tolerance
+                })
+        })
+        .count()
+}
+
+/// Computes volume from oriented triangles, taking the absolute volume per
+/// edge-connected component so oppositely oriented shells cannot cancel out.
 pub fn compute_mesh_volume(vertices: &[Vec<f64>], faces: &[Vec<usize>]) -> f64 {
     if vertices.is_empty() || faces.is_empty() {
         return 0.0;
     }
-    let total_volume = faces
+    face_components(faces)
         .par_iter()
-        .map(|face| {
-            let tris = triangulate_face(vertices, face);
-            let mut local_vol = 0.0;
-            for tri in tris {
-                let p0 = &vertices[tri[0] as usize];
-                let p1 = &vertices[tri[1] as usize];
-                let p2 = &vertices[tri[2] as usize];
-                if p0.len() >= 3 && p1.len() >= 3 && p2.len() >= 3 {
-                    let triple_product = p0[0] * (p1[1] * p2[2] - p1[2] * p2[1])
-                        - p0[1] * (p1[0] * p2[2] - p1[2] * p2[0])
-                        + p0[2] * (p1[0] * p2[1] - p1[1] * p2[0]);
-                    local_vol += triple_product;
+        .map(|component| {
+            // Shift each shell to a nearby reference before evaluating scalar
+            // triple products. The mathematical volume of a closed shell is
+            // translation invariant, while this local frame avoids the severe
+            // cancellation caused by large world coordinates.
+            let anchor_index = faces[component[0]][0];
+            let anchor = &vertices[anchor_index];
+            let mut component_volume = 0.0;
+            let mut compensation = 0.0;
+            for &face_index in component {
+                let tris = triangulate_face(vertices, &faces[face_index]);
+                for tri in tris {
+                    let p0 = &vertices[tri[0] as usize];
+                    let p1 = &vertices[tri[1] as usize];
+                    let p2 = &vertices[tri[2] as usize];
+                    let a = [p0[0] - anchor[0], p0[1] - anchor[1], p0[2] - anchor[2]];
+                    let b = [p1[0] - anchor[0], p1[1] - anchor[1], p1[2] - anchor[2]];
+                    let c = [p2[0] - anchor[0], p2[1] - anchor[1], p2[2] - anchor[2]];
+                    let signed_six_volume = a[0] * (b[1] * c[2] - b[2] * c[1])
+                        - a[1] * (b[0] * c[2] - b[2] * c[0])
+                        + a[2] * (b[0] * c[1] - b[1] * c[0]);
+                    let corrected = signed_six_volume - compensation;
+                    let next = component_volume + corrected;
+                    compensation = (next - component_volume) - corrected;
+                    component_volume = next;
                 }
             }
-            local_vol
+            (component_volume / 6.0).abs()
         })
-        .sum::<f64>();
-
-    (total_volume / 6.0).abs()
+        .sum()
 }
 
 /// Counts unique undirected edges in parallel. Used for Euler characteristic calculation.
@@ -297,6 +626,9 @@ pub fn compute_min_face_quality(vertices: &[Vec<f64>], faces: &[Vec<usize>]) -> 
         .par_iter()
         .map(|face| {
             let tris = triangulate_face(vertices, face);
+            if tris.is_empty() {
+                return 0.0;
+            }
             let mut min_tri_q = 1.0;
             for tri in tris {
                 let p0 = &vertices[tri[0] as usize];
@@ -354,11 +686,13 @@ pub fn find_boundary_edges(faces: &[Vec<usize>]) -> Vec<(usize, usize)> {
         }
     }
 
-    edge_occurrences
+    let mut edges: Vec<_> = edge_occurrences
         .into_iter()
         .filter(|&(_, count)| count == 1)
         .map(|(edge, _)| edge)
-        .collect()
+        .collect();
+    edges.sort_unstable();
+    edges
 }
 
 /// High-performance parallel detection of non-manifold topology edges
@@ -394,11 +728,13 @@ pub fn find_non_manifold_edges(faces: &[Vec<usize>]) -> Vec<(usize, usize)> {
             map1
         });
 
-    edge_occurrences
+    let mut edges: Vec<_> = edge_occurrences
         .into_par_iter()
         .filter(|&(_, count)| count > 2)
         .map(|(edge, _)| edge)
-        .collect()
+        .collect();
+    edges.sort_unstable();
+    edges
 }
 
 /// Audit log representing a single welded vertex operation
@@ -407,19 +743,21 @@ pub struct WeldAudit {
     pub old_index: usize,
     pub merged_into: usize,
     pub coordinates: Vec<f64>,
+    pub distance: f64,
 }
 
-/// Weld vertices by six-decimal coordinate signatures and retain an audit trail.
+/// Weld vertices using a deterministic spatial hash and Euclidean tolerance.
 pub fn weld_vertices(
     vertices: &[Vec<f64>],
     faces: &[Vec<usize>],
+    tolerance: f64,
 ) -> (Vec<Vec<f64>>, Vec<Vec<usize>>, Vec<WeldAudit>) {
     if vertices.is_empty() {
         return (Vec::new(), Vec::new(), Vec::new());
     }
 
     let mut unique_vertices = Vec::new();
-    let mut index_map = HashMap::new();
+    let mut cells: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
     let mut old_to_new = vec![0; vertices.len()];
     let mut weld_audit_logs = Vec::new();
 
@@ -427,23 +765,47 @@ pub fn weld_vertices(
         if v.len() < 3 {
             continue;
         }
-        let sig = format!("{:.6},{:.6},{:.6}", v[0], v[1], v[2]);
-        match index_map.entry(sig) {
-            std::collections::hash_map::Entry::Occupied(entry) => {
-                let merged_idx = *entry.get();
-                old_to_new[old_idx] = merged_idx;
-                weld_audit_logs.push(WeldAudit {
-                    old_index: old_idx,
-                    merged_into: merged_idx,
-                    coordinates: v.clone(),
-                });
+        let cell = (
+            (v[0] / tolerance).floor() as i64,
+            (v[1] / tolerance).floor() as i64,
+            (v[2] / tolerance).floor() as i64,
+        );
+        let mut match_index = None;
+        let mut match_distance = f64::INFINITY;
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(candidates) = cells.get(&(cell.0 + dx, cell.1 + dy, cell.2 + dz)) {
+                        for &candidate in candidates {
+                            let u: &Vec<f64> = &unique_vertices[candidate];
+                            let distance = ((u[0] - v[0]).powi(2)
+                                + (u[1] - v[1]).powi(2)
+                                + (u[2] - v[2]).powi(2))
+                            .sqrt();
+                            if distance <= tolerance
+                                && (match_index.is_none() || candidate < match_index.unwrap())
+                            {
+                                match_index = Some(candidate);
+                                match_distance = distance;
+                            }
+                        }
+                    }
+                }
             }
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                let new_idx = unique_vertices.len();
-                unique_vertices.push(v.clone());
-                entry.insert(new_idx);
-                old_to_new[old_idx] = new_idx;
-            }
+        }
+        if let Some(merged_idx) = match_index {
+            old_to_new[old_idx] = merged_idx;
+            weld_audit_logs.push(WeldAudit {
+                old_index: old_idx,
+                merged_into: merged_idx,
+                coordinates: v.clone(),
+                distance: match_distance,
+            });
+        } else {
+            let new_idx = unique_vertices.len();
+            unique_vertices.push(v.clone());
+            cells.entry(cell).or_default().push(new_idx);
+            old_to_new[old_idx] = new_idx;
         }
     }
 
@@ -565,6 +927,46 @@ pub fn unify_winding_directions(mut faces: Vec<Vec<usize>>) -> (Vec<Vec<usize>>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn welding_merges_any_pair_inside_euclidean_tolerance(
+            x in -1.0e3f64..1.0e3,
+            y in -1.0e3f64..1.0e3,
+            z in -1.0e3f64..1.0e3,
+            fraction in 0.0f64..=1.0,
+        ) {
+            let tolerance = 1.0e-6;
+            let vertices = vec![
+                vec![x, y, z],
+                vec![x + tolerance * fraction, y, z],
+                vec![x + 1.0, y, z],
+            ];
+            let (welded, _, audit) = weld_vertices(&vertices, &[], tolerance);
+            prop_assert_eq!(welded.len(), 2);
+            prop_assert_eq!(audit.len(), 1);
+            prop_assert!(audit[0].distance <= tolerance);
+        }
+
+        #[test]
+        fn tetrahedron_volume_is_translation_invariant(
+            tx in -1.0e3f64..1.0e3,
+            ty in -1.0e3f64..1.0e3,
+            tz in -1.0e3f64..1.0e3,
+        ) {
+            let vertices = vec![
+                vec![tx, ty, tz],
+                vec![tx + 1.0, ty, tz],
+                vec![tx, ty + 1.0, tz],
+                vec![tx, ty, tz + 1.0],
+            ];
+            let faces = vec![
+                vec![0, 2, 1], vec![0, 1, 3], vec![1, 2, 3], vec![2, 0, 3],
+            ];
+            prop_assert!((compute_mesh_volume(&vertices, &faces) - 1.0 / 6.0).abs() < 1e-10);
+        }
+    }
 
     #[test]
     fn triangulates_concave_polygon_without_losing_area() {
@@ -606,12 +1008,64 @@ mod tests {
             vec![0.0, 1.0, 0.0],
             vec![0.0, 0.0, 0.0],
         ];
-        let (welded, faces, audit) = weld_vertices(&vertices, &[vec![3, 1, 2]]);
+        let (welded, faces, audit) = weld_vertices(&vertices, &[vec![3, 1, 2]], 1e-6);
         assert_eq!(welded.len(), 3);
         assert_eq!(faces, vec![vec![0, 1, 2]]);
         assert_eq!(audit.len(), 1);
         assert_eq!(audit[0].old_index, 3);
         assert_eq!(audit[0].merged_into, 0);
+        assert_eq!(audit[0].distance, 0.0);
+    }
+
+    #[test]
+    fn welding_uses_euclidean_tolerance_across_grid_boundaries() {
+        let vertices = vec![
+            vec![0.99e-6, 0.0, 0.0],
+            vec![1.01e-6, 0.0, 0.0],
+            vec![1.0, 0.0, 0.0],
+        ];
+        let (welded, _, audit) = weld_vertices(&vertices, &[], 1e-6);
+        assert_eq!(welded.len(), 2);
+        assert_eq!(audit.len(), 1);
+        assert!((audit[0].distance - 0.02e-6).abs() < 1e-15);
+    }
+
+    #[test]
+    fn disconnected_shell_volumes_do_not_cancel() {
+        let mut vertices = vec![
+            vec![0.0, 0.0, 0.0],
+            vec![1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![0.0, 0.0, 1.0],
+        ];
+        vertices.extend(vertices.clone().into_iter().map(|mut point| {
+            point[0] += 2.0;
+            point
+        }));
+        let first = vec![vec![0, 2, 1], vec![0, 1, 3], vec![1, 2, 3], vec![2, 0, 3]];
+        let mut faces = first.clone();
+        faces.extend(
+            first
+                .into_iter()
+                .map(|face| face.into_iter().rev().map(|index| index + 4).collect()),
+        );
+
+        assert_eq!(count_face_components(&faces), 2);
+        assert!((compute_mesh_volume(&vertices, &faces) - 1.0 / 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn detects_non_adjacent_triangle_self_intersection() {
+        let vertices = vec![
+            vec![-1.0, -1.0, 0.0],
+            vec![1.0, -1.0, 0.0],
+            vec![0.0, 1.0, 0.0],
+            vec![0.0, -0.5, -1.0],
+            vec![0.0, -0.5, 1.0],
+            vec![0.0, 0.5, 0.0],
+        ];
+        let faces = vec![vec![0, 1, 2], vec![3, 4, 5]];
+        assert_eq!(find_self_intersections(&vertices, &faces), vec![(0, 1)]);
     }
 
     #[test]

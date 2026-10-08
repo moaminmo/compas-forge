@@ -1,41 +1,58 @@
-# Source release review — 6 October 2026
+# Source candidate and practical use
 
-## Corrections in this review
-
-Profile limits are explicit in native reports; CLI mass checks use the selected limit. Unknown profile names fail rather than silently selecting timber; `default` remains an explicit timber alias. The presentation candidate adds convergence-aware rigid-motion CCD, deterministic assembly interfaces and a tested COMPAS FAB trajectory adapter.
+Current version: **0.4.0, unpublished local research candidate**.
+The authoritative current gates are in [RELEASE_CHECK.md](RELEASE_CHECK.md).
+Historical audit reports preserve the state and hashes of their own runs.
 
 ## Intended use
 
-**Mesh diagnostics and fabrication preflight.** This is a source distribution for reproducible research and supervised evaluation. A public source release does not certify a machine, material, building or autonomous workflow.
+Mesh QA and geometric fabrication/robot-path preflight for COMPAS 2 and COMPAS
+FAB 2, using loaded collision geometry. Outputs expose diagnostic witnesses,
+convergence, pair attribution, exclusions and unresolved states. The software
+does not plan or command a robot, certify a machine, or replace its safety system.
 
-| Contract | Current implementation |
-|---|---|
-| Input | COMPAS mesh or JSON; metres for fabrication profiles |
-| Output | Topology metrics, profile decisions, repair candidates and reports |
-| Executed local checks | 35 Python tests, 4 Rust tests, Rust fmt/Clippy, release build |
-| Implementation | [Source](src/geometry.rs) |
-| Reproducible evidence | [Tests](tests/test_mesh_api.py) |
+## Install and evaluate
 
-## Workshop or laboratory workflow
+Use a matching CPython/platform wheel, or build from source with stable Rust:
 
-Run diagnostics, inspect boundary/nonmanifold witnesses, then compare the selected profile limits with the actual machine and material. Preserve the original geometry before repair.
+```sh
+python -m pip install ".[fab]"
+python examples/consumer_install_check.py --output install-check.json --job-output job.json
+compas-forge trajectory job.json --clearance .001 --articulated-tolerance .001 --serial
+```
 
-Record the input checksum, source revision, dependency versions, host version, units, tolerances, settings and output checksum for every evaluated specimen. The example fixtures establish specific behaviours; representative project data must be evaluated separately.
+`job.json` above is a bundled official model fixture, not proof about your own
+cell. See [LAB_WORKFLOW.md](LAB_WORKFLOW.md) for exporting your actual geometry,
+state, trajectory, scene/tool paths and attachment phases. Rhino 8/9 use their
+embedded CPython and matching native wheel; see [RHINO.md](RHINO.md).
 
-## Acceptance still required
+Record input checksum, package/build hashes, dependencies, host, units,
+tolerances, collision exclusions and output for every job. Preserve original
+geometry before repair. Recreate prepared contexts after changing inputs.
 
-Self-intersection/solid containment and machine-specific manufacturing acceptance are not established. The COMPAS FAB adapter uses piecewise Cartesian sweeps between sampled FK frames; it is not a substitute for a certified robot safety system or full-link collision checker.
+## Evidence boundaries
 
-No comparison in this review establishes universal optimality or state-of-the-art superiority. Algorithm choice is justified by the task and tested numerical behaviour. Independent benchmarks should compare the same inputs, correctness criteria and hardware, retaining raw timings and failure cases.
+The final installed suites and clean sdist consumer passed locally on Windows.
+Independent CGAL/Bullet comparisons cover specified fixtures, not every mesh or
+continuous robot trajectory. Mathematical motion envelopes do not establish
+an exact floating-point distance-error bound. Physical margins need laboratory
+data. A `clear` result is conditional on the documented geometry/motion contracts.
 
-## Publication package
+CLI/JSON require no visualization server. Interactive HTML currently needs
+internet assets. Full GH component-graph testing, remote cross-platform CI and
+physical lab acceptance remain open gates. General solid Boolean union,
+controller blending, grasp mechanics and multi-robot trajectories are not claimed.
 
-- README, license, source, build metadata and regression tests are included.
-- Publish each project as a separate repository, preserving third-party attribution.
-- Build from the documented dependencies; proprietary SDKs and compiled outputs are excluded from the source archive.
-- Run the provided CI on the actual repository before tagging a release. Local results are not GitHub-hosted CI results.
-- Cite the exact version or commit used; no DOI, paper acceptance or external certification is asserted.
+## Before publication
 
-## Retained publication evidence
+- Inspect source, documentation, licensing and all new artifacts; preserve
+  third-party attribution and historical `SOURCE_SHA256.json`.
+- Publish only after owner approval; no commit/push/tag has been performed here.
+- Run remote CI before a release tag, and distribute matching audited wheels
+  rather than requiring Rhino users to build a Rust extension themselves.
+- Identify the exact commit and binary artifacts in reproducibility material.
+- Do not claim maintainer acceptance, a DOI/paper, safety certification,
+  scientific priority or universal speed superiority.
 
-The [executed example](publication/README.md) includes raw results, a reproducible figure, source links and a SHA-256 manifest. The [introduction draft](publication/linkedin.md) describes this evidence within its tested scope.
+[Claims](CLAIMS.md) · [Validation](VALIDATION.md) ·
+[Mathematical contracts](ROBUSTNESS.md) · [Contributing](CONTRIBUTING.md)

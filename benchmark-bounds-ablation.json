@@ -1,0 +1,31 @@
+{
+  "platform": "Windows-11-10.0.26300-SP0",
+  "python": "3.14.2",
+  "scope": "same native build and retained queries; only tight_bounds differs",
+  "query_count": 310,
+  "rejections": 261,
+  "baseline_seconds": [
+    6.513717400001042,
+    6.183156200000667,
+    6.352246800001012,
+    6.480832199998986,
+    6.573141700002452,
+    6.478928000000451
+  ],
+  "tight_seconds": [
+    4.95543760000146,
+    4.971148799999355,
+    4.788540999998077,
+    4.892119000000093,
+    5.013676900001883,
+    4.990984600000957
+  ],
+  "median_baseline": 6.479880099999718,
+  "median_tight": 4.9632932000004075,
+  "ratio": 1.3055606104429185,
+  "source_sha256": {
+    "src/bounds.rs": "a4279594b7d3cd558e331c38f749a1beb1baed3abd09eee83a4dbaca18242909",
+    "src/lib.rs": "c73a4dd67ad687d7706fb5a40593cb38290d3813898f5b5923785b29f6968b58",
+    "benchmark_bounds.py": "6a0d413311d0a5a476e7fa946be4da3d9b76402defec935b9f7d68cdcddeb04b"
+  }
+}

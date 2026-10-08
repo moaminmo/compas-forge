@@ -17,6 +17,9 @@ __pycache__/
 *.so
 *.dylib
 *.egg-info/
+pyperf-*.json
+!pyperf-presentation-candidate.json
+!pyperf-topology-presentation-candidate.json
 .vs/
 *.user
 .env

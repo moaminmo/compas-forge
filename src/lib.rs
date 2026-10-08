@@ -4,15 +4,18 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use rstar::RTree;
 use std::collections::HashMap;
-use std::sync::Mutex;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
+mod bounds;
+mod clearance;
 mod geometry;
 mod parser;
+mod solid;
 
 use geometry::{
     compute_max_planarity_deviation, compute_mesh_volume, compute_min_face_quality,
-    count_unique_edges, find_boundary_edges, find_non_manifold_edges, triangulate_face,
+    count_degenerate_faces, count_face_components, count_unique_edges, find_boundary_edges,
+    find_non_manifold_edges, find_self_intersections, has_consistent_winding, triangulate_face,
     unify_winding_directions, weld_vertices, Aabb, SpatialPart,
 };
 use parser::{CompasDataObject, ValidationResult};
@@ -26,14 +29,25 @@ use parry3d_f64::query::{
 };
 use parry3d_f64::shape::TriMesh;
 
-static MESH_REGISTRY: OnceLock<Mutex<HashMap<String, TriMesh>>> = OnceLock::new();
+struct RegisteredMesh {
+    mesh: TriMesh,
+    origin_radius: f64,
+    local_bounds: ([f64; 3], [f64; 3]),
+    solid_issue: OnceLock<Option<&'static str>>,
+    solid_representatives: OnceLock<Vec<usize>>,
+}
 
-fn get_mesh_registry() -> &'static Mutex<HashMap<String, TriMesh>> {
-    MESH_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+static MESH_REGISTRY: OnceLock<RwLock<HashMap<String, Arc<RegisteredMesh>>>> = OnceLock::new();
+const DEFAULT_WELD_TOLERANCE: f64 = 1e-6;
+const DEGENERATE_AREA_TOLERANCE: f64 = 1e-12;
+
+fn get_mesh_registry() -> &'static RwLock<HashMap<String, Arc<RegisteredMesh>>> {
+    MESH_REGISTRY.get_or_init(|| RwLock::new(HashMap::new()))
 }
 
 #[derive(serde::Serialize)]
 struct FixedMeshReport {
+    weld_tolerance: f64,
     welded_count: usize,
     flipped_count: usize,
     weld_details: Vec<geometry::WeldAudit>,
@@ -46,6 +60,7 @@ struct FixedBuffersReport {
     vertices: Vec<f64>,
     face_indices: Vec<i32>,
     face_offsets: Vec<i32>,
+    weld_tolerance: f64,
     welded_count: usize,
     flipped_count: usize,
     weld_details: Vec<geometry::WeldAudit>,
@@ -57,6 +72,7 @@ struct PreflightResult {
     profile_name: String,
     is_compliant: bool,
     volume_m3: f64,
+    volume_reliable: bool,
     estimated_mass_kg: f64,
     max_mass_kg: f64,
     mass_within_limit: bool,
@@ -64,6 +80,11 @@ struct PreflightResult {
     boundary_edges_count: usize,
     boundary_edges: Vec<(usize, usize)>,
     is_watertight: bool,
+    winding_consistent: bool,
+    degenerate_faces_count: usize,
+    surface_components: usize,
+    isolated_vertices_count: usize,
+    self_intersections: Vec<(usize, usize)>,
     fits_workspace: bool,
     bounds_x_dim: f64,
     bounds_y_dim: f64,
@@ -72,7 +93,7 @@ struct PreflightResult {
     vertices: Vec<Vec<f64>>,
     triangulated_faces: Vec<[u32; 3]>,
     euler_characteristic: i32,
-    genus: usize,
+    genus: Option<usize>,
     max_planarity_deviation: f64,
     min_face_quality: f64,
 }
@@ -82,6 +103,8 @@ struct AssemblyClashResult {
     part_a: String,
     part_b: String,
     has_intersection: bool,
+    relationship: String,
+    classification_reliable: bool,
     minimum_distance: f64,
     is_clearance_violation: bool,
 }
@@ -101,6 +124,7 @@ struct SweptImpact {
     converged: bool,
     conservative: bool,
     geometry_reliable: bool,
+    verification_distance: Option<f64>,
     witness_a_local: Vec<f64>,
     witness_b_local: Vec<f64>,
     normal_a_local: Vec<f64>,
@@ -111,14 +135,49 @@ struct SweptImpact {
     normal_b_world: Vec<f64>,
 }
 
+fn swept_result_to_python(py: Python<'_>, result: &SweptCollisionResult) -> PyResult<Py<PyDict>> {
+    let output = PyDict::new(py);
+    output.set_item("has_collision", result.has_collision)?;
+    output.set_item("time_of_impact", result.time_of_impact)?;
+    output.set_item("method", &result.method)?;
+    output.set_item("substeps", result.substeps)?;
+    if let Some(impact) = &result.impact {
+        let impact_output = PyDict::new(py);
+        impact_output.set_item("status", &impact.status)?;
+        impact_output.set_item("converged", impact.converged)?;
+        impact_output.set_item("conservative", impact.conservative)?;
+        impact_output.set_item("geometry_reliable", impact.geometry_reliable)?;
+        impact_output.set_item("verification_distance", impact.verification_distance)?;
+        impact_output.set_item("witness_a_local", &impact.witness_a_local)?;
+        impact_output.set_item("witness_b_local", &impact.witness_b_local)?;
+        impact_output.set_item("normal_a_local", &impact.normal_a_local)?;
+        impact_output.set_item("normal_b_local", &impact.normal_b_local)?;
+        impact_output.set_item("witness_a_world", &impact.witness_a_world)?;
+        impact_output.set_item("witness_b_world", &impact.witness_b_world)?;
+        impact_output.set_item("normal_a_world", &impact.normal_a_world)?;
+        impact_output.set_item("normal_b_world", &impact.normal_b_world)?;
+        output.set_item("impact", impact_output)?;
+    } else {
+        output.set_item("impact", py.None())?;
+    }
+    Ok(output.unbind())
+}
+
 #[derive(serde::Serialize)]
 struct ContactInterface {
     block_a: String,
     block_b: String,
+    area: f64,
     area_m2: f64,
+    area_units: String,
     centroid: [f64; 3],
     normal: [f64; 3],
+    normal_alignment: f64,
+    maximum_plane_deviation: f64,
+    classification_reliable: bool,
+    method: String,
     vertices_3d: Vec<[f64; 3]>,
+    patches_3d: Vec<Vec<[f64; 3]>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -128,27 +187,10 @@ struct Point2D {
 }
 
 fn check_duplicates_parallel(vertices: &[Vec<f64>]) -> usize {
-    if vertices.is_empty() {
-        return 0;
-    }
-
-    let signatures: Vec<String> = vertices
-        .par_iter()
-        .map(|v| format!("{:.6},{:.6},{:.6}", v[0], v[1], v[2]))
-        .collect();
-
-    let mut unique_set = HashSet::with_capacity(vertices.len());
-    let mut duplicates = 0;
-
-    for sig in signatures {
-        if !unique_set.insert(sig) {
-            duplicates += 1;
-        }
-    }
-    duplicates
+    weld_vertices(vertices, &[], DEFAULT_WELD_TOLERANCE).2.len()
 }
 
-fn compute_mesh_distance(part_a: &SpatialPart, part_b: &SpatialPart) -> Option<f64> {
+fn compute_mesh_distance(part_a: &SpatialPart, part_b: &SpatialPart) -> Result<f64, String> {
     let pts_a: Vec<Vector> = part_a
         .vertices
         .iter()
@@ -174,16 +216,20 @@ fn compute_mesh_distance(part_a: &SpatialPart, part_b: &SpatialPart) -> Option<f
     }
 
     if indices_a.is_empty() || indices_b.is_empty() {
-        return None;
+        return Err("triangulation produced no usable triangles".to_string());
     }
 
-    let mesh_a = TriMesh::new(pts_a, indices_a).ok()?;
-    let mesh_b = TriMesh::new(pts_b, indices_b).ok()?;
+    let mesh_a = TriMesh::new(pts_a, indices_a)
+        .map_err(|error| format!("failed to build first TriMesh: {error}"))?;
+    let mesh_b = TriMesh::new(pts_b, indices_b)
+        .map_err(|error| format!("failed to build second TriMesh: {error}"))?;
 
     let pos_a = Pose::identity();
     let pos_b = Pose::identity();
 
-    distance(&pos_a, &mesh_a, &pos_b, &mesh_b).ok()
+    distance(&pos_a, &mesh_a, &pos_b, &mesh_b)
+        .map(|result| result.distance)
+        .map_err(|error| format!("unsupported mesh distance query: {error:?}"))
 }
 
 fn parse_pose(arr: &[f64]) -> PyResult<Pose> {
@@ -245,6 +291,271 @@ fn validate_buffers(vertices: &[f64], indices: &[i32], offsets: &[i32]) -> PyRes
     Ok(())
 }
 
+/// Perform a structural mesh scan directly over borrowed Python buffers.
+///
+/// This deliberately keeps the GIL: the buffers remain owned by Python for the
+/// duration of the scan. Unlike mesh registration and full topology analysis,
+/// this hot path does not materialise Rust `Vec`s or retain any borrowed data.
+#[pyfunction]
+fn scan_mesh_buffers_borrowed(
+    py: Python<'_>,
+    vertices_obj: &Bound<'_, PyAny>,
+    face_indices_obj: &Bound<'_, PyAny>,
+    face_offsets_obj: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyDict>> {
+    let vertices = PyBuffer::<f64>::get(vertices_obj)
+        .map_err(|error| PyValueError::new_err(format!("vertices buffer: {error}")))?;
+    let indices = PyBuffer::<i32>::get(face_indices_obj)
+        .map_err(|error| PyValueError::new_err(format!("indices buffer: {error}")))?;
+    let offsets = PyBuffer::<i32>::get(face_offsets_obj)
+        .map_err(|error| PyValueError::new_err(format!("offsets buffer: {error}")))?;
+
+    let vertices = vertices
+        .as_slice(py)
+        .ok_or_else(|| PyValueError::new_err("vertices buffer must be C-contiguous"))?;
+    let indices = indices
+        .as_slice(py)
+        .ok_or_else(|| PyValueError::new_err("indices buffer must be C-contiguous"))?;
+    let offsets = offsets
+        .as_slice(py)
+        .ok_or_else(|| PyValueError::new_err("offsets buffer must be C-contiguous"))?;
+
+    let xyz_aligned = vertices.len().is_multiple_of(3);
+    let vertex_count = vertices.len() / 3;
+    let mut finite_coordinates = true;
+    let mut min = [f64::INFINITY; 3];
+    let mut max = [f64::NEG_INFINITY; 3];
+    for (position, value) in vertices.iter().enumerate() {
+        let value = value.get();
+        if !value.is_finite() {
+            finite_coordinates = false;
+            continue;
+        }
+        let axis = position % 3;
+        min[axis] = min[axis].min(value);
+        max[axis] = max[axis].max(value);
+    }
+
+    let mut invalid_index_count = 0usize;
+    for value in indices.iter() {
+        let value = value.get();
+        if value < 0 || value as usize >= vertex_count {
+            invalid_index_count += 1;
+        }
+    }
+
+    let mut offsets_valid = offsets.len() >= 2 && offsets[0].get() == 0;
+    let mut undersized_face_count = 0usize;
+    let mut previous = 0i32;
+    for (position, value) in offsets.iter().enumerate() {
+        let value = value.get();
+        if value < 0 || (position > 0 && value < previous) {
+            offsets_valid = false;
+        }
+        if position > 0 && value >= previous && value - previous < 3 {
+            undersized_face_count += 1;
+        }
+        previous = value;
+    }
+    if offsets.last().map(|value| value.get() as usize) != Some(indices.len()) {
+        offsets_valid = false;
+    }
+
+    let is_structurally_valid = xyz_aligned
+        && finite_coordinates
+        && offsets_valid
+        && invalid_index_count == 0
+        && undersized_face_count == 0;
+    let output = PyDict::new(py);
+    output.set_item("is_structurally_valid", is_structurally_valid)?;
+    output.set_item("borrowed_input", true)?;
+    output.set_item("owned_input_copy_bytes", 0usize)?;
+    output.set_item("vertex_count", vertex_count)?;
+    output.set_item("face_count", offsets.len().saturating_sub(1))?;
+    output.set_item("index_count", indices.len())?;
+    output.set_item(
+        "input_bytes",
+        vertices.len() * 8 + indices.len() * 4 + offsets.len() * 4,
+    )?;
+    output.set_item("xyz_aligned", xyz_aligned)?;
+    output.set_item("finite_coordinates", finite_coordinates)?;
+    output.set_item("offsets_valid", offsets_valid)?;
+    output.set_item("invalid_index_count", invalid_index_count)?;
+    output.set_item("undersized_face_count", undersized_face_count)?;
+    if vertex_count > 0 && finite_coordinates && xyz_aligned {
+        output.set_item("bounds_min", min)?;
+        output.set_item("bounds_max", max)?;
+    } else {
+        output.set_item("bounds_min", py.None())?;
+        output.set_item("bounds_max", py.None())?;
+    }
+    Ok(output.unbind())
+}
+
+/// Evaluate only the topology predicates needed by COMPAS Mesh methods.
+///
+/// Coordinates, triangulation, self-intersection and volume are intentionally
+/// excluded so this remains a fair accelerator for `is_closed/is_manifold`.
+#[pyfunction]
+fn topology_predicates_buffers(
+    py: Python<'_>,
+    vertex_count: usize,
+    face_indices_obj: &Bound<'_, PyAny>,
+    face_offsets_obj: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyDict>> {
+    let indices = PyBuffer::<i32>::get(face_indices_obj)
+        .map_err(|error| PyValueError::new_err(format!("indices buffer: {error}")))?;
+    let offsets = PyBuffer::<i32>::get(face_offsets_obj)
+        .map_err(|error| PyValueError::new_err(format!("offsets buffer: {error}")))?;
+    let indices = indices
+        .as_slice(py)
+        .ok_or_else(|| PyValueError::new_err("indices buffer must be C-contiguous"))?;
+    let offsets = offsets
+        .as_slice(py)
+        .ok_or_else(|| PyValueError::new_err("offsets buffer must be C-contiguous"))?;
+    if offsets.first().map(|value| value.get()) != Some(0)
+        || offsets.last().map(|value| value.get() as usize) != Some(indices.len())
+        || offsets.windows(2).any(|window| {
+            let start = window[0].get();
+            let end = window[1].get();
+            start < 0 || end < start || end - start < 3
+        })
+        || indices
+            .iter()
+            .any(|index| index.get() < 0 || index.get() as usize >= vertex_count)
+    {
+        return Err(PyValueError::new_err(
+            "invalid topology offsets or vertex indices",
+        ));
+    }
+
+    let mut edge_counts: HashMap<(usize, usize), usize> = HashMap::new();
+    let mut vertex_links = vec![Vec::<(usize, usize)>::new(); vertex_count];
+    for bounds in offsets.windows(2) {
+        let start = bounds[0].get() as usize;
+        let end = bounds[1].get() as usize;
+        let face = &indices[start..end];
+        for position in 0..face.len() {
+            let current = face[position].get() as usize;
+            let previous = face[(position + face.len() - 1) % face.len()].get() as usize;
+            let next = face[(position + 1) % face.len()].get() as usize;
+            vertex_links[current].push((previous, next));
+            let edge = if current < next {
+                (current, next)
+            } else {
+                (next, current)
+            };
+            *edge_counts.entry(edge).or_insert(0) += 1;
+        }
+    }
+
+    let boundary_edges_count = edge_counts.values().filter(|&&count| count == 1).count();
+    let mut non_manifold_edges: Vec<_> = edge_counts
+        .into_iter()
+        .filter_map(|(edge, count)| (count > 2).then_some(edge))
+        .collect();
+    non_manifold_edges.sort_unstable();
+    let isolated_vertices_count = vertex_links.iter().filter(|links| links.is_empty()).count();
+    let mut non_manifold_vertices = Vec::new();
+    for (vertex, links) in vertex_links.iter().enumerate() {
+        if links.is_empty() {
+            continue;
+        }
+        let mut adjacency: HashMap<usize, Vec<usize>> = HashMap::new();
+        for &(a, b) in links {
+            adjacency.entry(a).or_default().push(b);
+            adjacency.entry(b).or_default().push(a);
+        }
+        let endpoints = adjacency
+            .values()
+            .filter(|neighbors| neighbors.len() == 1)
+            .count();
+        let mut seen = HashSet::new();
+        let mut stack = vec![*adjacency.keys().next().unwrap()];
+        while let Some(neighbor) = stack.pop() {
+            if seen.insert(neighbor) {
+                stack.extend(&adjacency[&neighbor]);
+            }
+        }
+        if seen.len() != adjacency.len()
+            || adjacency.values().any(|neighbors| neighbors.len() > 2)
+            || (endpoints != 0 && endpoints != 2)
+        {
+            non_manifold_vertices.push(vertex);
+        }
+    }
+
+    let output = PyDict::new(py);
+    output.set_item("is_closed", vertex_count > 0 && boundary_edges_count == 0)?;
+    output.set_item(
+        "is_manifold",
+        vertex_count > 0
+            && isolated_vertices_count == 0
+            && non_manifold_edges.is_empty()
+            && non_manifold_vertices.is_empty(),
+    )?;
+    output.set_item("boundary_edges_count", boundary_edges_count)?;
+    output.set_item("non_manifold_edges", non_manifold_edges)?;
+    output.set_item("non_manifold_vertices", non_manifold_vertices)?;
+    output.set_item("isolated_vertices_count", isolated_vertices_count)?;
+    Ok(output.unbind())
+}
+
+struct MeshTopologyMetrics {
+    boundary_edges: Vec<(usize, usize)>,
+    is_watertight: bool,
+    winding_consistent: bool,
+    degenerate_faces_count: usize,
+    surface_components: usize,
+    isolated_vertices_count: usize,
+    self_intersections: Vec<(usize, usize)>,
+    euler_characteristic: i32,
+    genus: Option<usize>,
+    volume_reliable: bool,
+}
+
+fn mesh_topology_metrics(vertices: &[Vec<f64>], faces: &[Vec<usize>]) -> MeshTopologyMetrics {
+    let boundary_edges = find_boundary_edges(faces);
+    let non_manifold_edges = find_non_manifold_edges(faces);
+    let non_manifold_vertices = geometry::find_non_manifold_vertices(faces);
+    let degenerate_faces_count = count_degenerate_faces(vertices, faces, DEGENERATE_AREA_TOLERANCE);
+    let winding_consistent = has_consistent_winding(faces);
+    let self_intersections = find_self_intersections(vertices, faces);
+    let surface_components = count_face_components(faces);
+    let used_vertices: HashSet<usize> = faces.iter().flatten().copied().collect();
+    let isolated_vertices_count = vertices.len().saturating_sub(used_vertices.len());
+    let euler_characteristic =
+        used_vertices.len() as i32 - count_unique_edges(faces) as i32 + faces.len() as i32;
+    let is_watertight = !faces.is_empty()
+        && boundary_edges.is_empty()
+        && non_manifold_edges.is_empty()
+        && non_manifold_vertices.is_empty()
+        && degenerate_faces_count == 0;
+    let genus_numerator = 2 * surface_components as i32 - euler_characteristic;
+    let genus = if is_watertight
+        && winding_consistent
+        && genus_numerator >= 0
+        && genus_numerator % 2 == 0
+    {
+        Some((genus_numerator / 2) as usize)
+    } else {
+        None
+    };
+
+    MeshTopologyMetrics {
+        boundary_edges,
+        is_watertight,
+        winding_consistent,
+        degenerate_faces_count,
+        surface_components,
+        isolated_vertices_count,
+        euler_characteristic,
+        genus,
+        volume_reliable: is_watertight && winding_consistent && self_intersections.is_empty(),
+        self_intersections,
+    }
+}
+
 fn trimesh_from_buffers(
     vertices_flat: &[f64],
     face_indices: &[i32],
@@ -293,6 +604,59 @@ fn rigid_motion(start: &Pose, end: &Pose) -> NonlinearRigidMotion {
     )
 }
 
+fn swept_origin_sphere_bounds(start: &Pose, end: &Pose, radius: f64) -> ([f64; 3], [f64; 3]) {
+    let start = start.translation.to_array();
+    let end = end.translation.to_array();
+    let mut mins = [0.0; 3];
+    let mut maxs = [0.0; 3];
+    for axis in 0..3 {
+        mins[axis] = start[axis].min(end[axis]) - radius;
+        maxs[axis] = start[axis].max(end[axis]) + radius;
+    }
+    (mins, maxs)
+}
+
+fn sweep_registered_meshes(
+    a: &RegisteredMesh,
+    a0: &Pose,
+    a1: &Pose,
+    b: &RegisteredMesh,
+    b0: &Pose,
+    b1: &Pose,
+    tight_bounds: bool,
+) -> PyResult<SweptCollisionResult> {
+    // Every point of a rigid mesh remains inside a sphere centred at its pose
+    // translation.  The union of that sphere along the linearly interpolated
+    // translation is a conservative swept AABB even while the mesh rotates.
+    let (a_min, a_max) = swept_origin_sphere_bounds(a0, a1, a.origin_radius);
+    let (b_min, b_max) = swept_origin_sphere_bounds(b0, b1, b.origin_radius);
+    let separated = (0..3).any(|axis| a_max[axis] < b_min[axis] || b_max[axis] < a_min[axis]);
+    if separated {
+        return Ok(SweptCollisionResult {
+            has_collision: false,
+            time_of_impact: None,
+            method: "swept_sphere_aabb_rejected".to_string(),
+            substeps: 0,
+            impact: None,
+        });
+    }
+    if !tight_bounds {
+        return sweep_meshes(&a.mesh, a0, a1, &b.mesh, b0, b1);
+    }
+    let (a_min, a_max) = bounds::swept_endpoint_bounds(a, a0, a1);
+    let (b_min, b_max) = bounds::swept_endpoint_bounds(b, b0, b1);
+    if tight_bounds && (0..3).any(|axis| a_max[axis] < b_min[axis] || b_max[axis] < a_min[axis]) {
+        return Ok(SweptCollisionResult {
+            has_collision: false,
+            time_of_impact: None,
+            method: "swept_endpoint_aabb_rejected".to_string(),
+            substeps: 0,
+            impact: None,
+        });
+    }
+    sweep_meshes(&a.mesh, a0, a1, &b.mesh, b0, b1)
+}
+
 fn sweep_meshes(
     a: &TriMesh,
     a0: &Pose,
@@ -314,7 +678,7 @@ fn sweep_meshes(
     let initial_distance = distance(a0, a, b0, b)
         .map_err(|e| PyValueError::new_err(format!("Unsupported initial distance query: {e:?}")))?;
 
-    let (method, substeps, result) = if initial_distance <= 1e-12 {
+    let (method, substeps, result) = if initial_distance.distance <= 1e-12 {
         let hit =
             cast_shapes_nonlinear(&motion_a, a, &motion_b, b, 0.0, 1.0, true).map_err(|e| {
                 PyValueError::new_err(format!("Unsupported initial-overlap query: {e:?}"))
@@ -323,10 +687,10 @@ fn sweep_meshes(
     } else if max_rotation <= 1e-10 {
         let velocity_a_world = a1.translation - a0.translation;
         let velocity_b_world = b1.translation - b0.translation;
-        // Parry expresses the first velocity in the first pose's local frame.
-        let velocity_a_local = a0.rotation.inverse() * velocity_a_world;
+        // Parry's public shape-cast API accepts both velocities in world space and
+        // transforms their relative velocity into the first shape's frame internally.
         let options = ShapeCastOptions::with_max_time_of_impact(1.0);
-        let hit = cast_shapes(a0, velocity_a_local, a, b0, velocity_b_world, b, options)
+        let hit = cast_shapes(a0, velocity_a_world, a, b0, velocity_b_world, b, options)
             .map_err(|e| PyValueError::new_err(format!("Unsupported linear shape cast: {e:?}")))?;
         ("linear".to_string(), 1, hit)
     } else {
@@ -360,6 +724,12 @@ fn sweep_meshes(
                 hit.status,
                 ShapeCastStatus::Failed | ShapeCastStatus::OutOfIterations
             );
+            let verification_distance = distance(&pose_a_at_impact, a, &pose_b_at_impact, b)
+                .ok()
+                .map(|result| result.distance);
+            let geometry_reliable = converged
+                && verification_distance
+                    .is_some_and(|residual| residual.is_finite() && residual <= 1e-8);
             SweptCollisionResult {
                 has_collision: true,
                 time_of_impact: Some(hit.time_of_impact),
@@ -369,25 +739,30 @@ fn sweep_meshes(
                     status: format!("{:?}", hit.status),
                     converged,
                     conservative,
-                    // Deliberately strict: callers should only treat contact geometry from a
-                    // fully converged solve as presentation/measurement grade.
-                    geometry_reliable: converged,
+                    // Deliberately strict: require both solver convergence and an independent
+                    // distance residual at the reported impact poses.
+                    geometry_reliable,
+                    verification_distance,
                     witness_a_local: hit.witness1.to_array().to_vec(),
                     witness_b_local: hit.witness2.to_array().to_vec(),
                     normal_a_local: hit.normal1.to_array().to_vec(),
                     normal_b_local: hit.normal2.to_array().to_vec(),
-                    witness_a_world: (pose_a_at_impact.rotation * hit.witness1
+                    witness_a_world: (pose_a_at_impact.rotation.mul_vec3(hit.witness1)
                         + pose_a_at_impact.translation)
                         .to_array()
                         .to_vec(),
-                    witness_b_world: (pose_b_at_impact.rotation * hit.witness2
+                    witness_b_world: (pose_b_at_impact.rotation.mul_vec3(hit.witness2)
                         + pose_b_at_impact.translation)
                         .to_array()
                         .to_vec(),
-                    normal_a_world: (pose_a_at_impact.rotation * hit.normal1)
+                    normal_a_world: pose_a_at_impact
+                        .rotation
+                        .mul_vec3(hit.normal1)
                         .to_array()
                         .to_vec(),
-                    normal_b_world: (pose_b_at_impact.rotation * hit.normal2)
+                    normal_b_world: pose_b_at_impact
+                        .rotation
+                        .mul_vec3(hit.normal2)
                         .to_array()
                         .to_vec(),
                 }),
@@ -498,6 +873,89 @@ fn polygon_area_and_centroid(poly: &[Point2D]) -> (f64, Point2D) {
     }
 }
 
+fn ensure_counterclockwise(mut polygon: Vec<Point2D>) -> Vec<Point2D> {
+    let signed_twice_area: f64 = polygon
+        .iter()
+        .zip(polygon.iter().cycle().skip(1))
+        .take(polygon.len())
+        .map(|(a, b)| a.x * b.y - b.x * a.y)
+        .sum();
+    if signed_twice_area < 0.0 {
+        polygon.reverse();
+    }
+    polygon
+}
+
+fn maximum_plane_distance(
+    vertices: &[Vector],
+    face: &[usize],
+    plane_origin: Vector,
+    plane_normal: Vector,
+) -> f64 {
+    face.iter()
+        .map(|&index| ((vertices[index] - plane_origin).dot(plane_normal)).abs())
+        .fold(0.0, f64::max)
+}
+
+fn intersect_projected_faces(
+    vertices_a: &[Vector],
+    face_a: &[usize],
+    vertices_b: &[Vector],
+    face_b: &[usize],
+    origin: Vector,
+    u: Vector,
+    v: Vector,
+) -> (f64, Point2D, Vec<Vec<Point2D>>) {
+    let triangles_a = triangulate_face(vertices_a, face_a);
+    let triangles_b = triangulate_face(vertices_b, face_b);
+    let project = |point: Vector| {
+        let delta = point - origin;
+        Point2D {
+            x: delta.dot(u),
+            y: delta.dot(v),
+        }
+    };
+    let mut total_area = 0.0;
+    let mut weighted_x = 0.0;
+    let mut weighted_y = 0.0;
+    let mut patches = Vec::new();
+
+    for triangle_a in &triangles_a {
+        let clip = ensure_counterclockwise(
+            triangle_a
+                .iter()
+                .map(|&index| project(vertices_a[index as usize]))
+                .collect(),
+        );
+        for triangle_b in &triangles_b {
+            let subject = ensure_counterclockwise(
+                triangle_b
+                    .iter()
+                    .map(|&index| project(vertices_b[index as usize]))
+                    .collect(),
+            );
+            let patch = clip_polygon(&subject, &clip);
+            let (area, centroid) = polygon_area_and_centroid(&patch);
+            if area > 0.0 {
+                total_area += area;
+                weighted_x += centroid.x * area;
+                weighted_y += centroid.y * area;
+                patches.push(patch);
+            }
+        }
+    }
+
+    let centroid = if total_area > 0.0 {
+        Point2D {
+            x: weighted_x / total_area,
+            y: weighted_y / total_area,
+        }
+    } else {
+        Point2D { x: 0.0, y: 0.0 }
+    };
+    (total_area, centroid, patches)
+}
+
 fn calculate_face_normal_and_centroid(vertices: &[Vector], face: &[usize]) -> (Vector, Vector) {
     let len = face.len();
     let mut centroid = Vector::new(0.0, 0.0, 0.0);
@@ -528,23 +986,36 @@ fn validate_compas_json(json_str: &str) -> PyResult<String> {
         PyValueError::new_err(format!("Malformed COMPAS JSON Schema (SIMD): {}", err))
     })?;
 
-    let (vertices, faces) = obj.data.get_vertices_and_faces();
+    let (vertices, faces) = obj
+        .data
+        .get_vertices_and_faces()
+        .map_err(PyValueError::new_err)?;
     validate_geometry(&vertices, &faces)?;
 
     let duplicate_count = check_duplicates_parallel(&vertices);
     let non_manifold = find_non_manifold_edges(&faces);
     let non_manifold_vertices = geometry::find_non_manifold_vertices(&faces);
+    let degenerate_faces_count =
+        count_degenerate_faces(&vertices, &faces, DEGENERATE_AREA_TOLERANCE);
+    let winding_consistent = has_consistent_winding(&faces);
+    let self_intersections = find_self_intersections(&vertices, &faces);
     let bbox = Aabb::from_vertices(&vertices);
 
     let result = ValidationResult {
         is_valid: duplicate_count == 0
             && non_manifold.is_empty()
-            && non_manifold_vertices.is_empty(),
+            && non_manifold_vertices.is_empty()
+            && degenerate_faces_count == 0
+            && self_intersections.is_empty(),
         vertex_count: vertices.len(),
         face_count: faces.len(),
         non_manifold_edges: non_manifold,
         non_manifold_vertices,
         duplicate_vertices: duplicate_count,
+        duplicate_tolerance: DEFAULT_WELD_TOLERANCE,
+        degenerate_faces_count,
+        winding_consistent,
+        self_intersections,
         boundary_edges_count: find_boundary_edges(&faces).len(),
         bounding_box: bbox,
     };
@@ -610,17 +1081,27 @@ fn validate_mesh_buffers(
     let duplicate_count = check_duplicates_parallel(&vertices);
     let non_manifold = find_non_manifold_edges(&faces);
     let non_manifold_vertices = geometry::find_non_manifold_vertices(&faces);
+    let degenerate_faces_count =
+        count_degenerate_faces(&vertices, &faces, DEGENERATE_AREA_TOLERANCE);
+    let winding_consistent = has_consistent_winding(&faces);
+    let self_intersections = find_self_intersections(&vertices, &faces);
     let bbox = Aabb::from_vertices(&vertices);
 
     let result = ValidationResult {
         is_valid: duplicate_count == 0
             && non_manifold.is_empty()
-            && non_manifold_vertices.is_empty(),
+            && non_manifold_vertices.is_empty()
+            && degenerate_faces_count == 0
+            && self_intersections.is_empty(),
         vertex_count,
         face_count,
         non_manifold_edges: non_manifold,
         non_manifold_vertices,
         duplicate_vertices: duplicate_count,
+        duplicate_tolerance: DEFAULT_WELD_TOLERANCE,
+        degenerate_faces_count,
+        winding_consistent,
+        self_intersections,
         boundary_edges_count: find_boundary_edges(&faces).len(),
         bounding_box: bbox,
     };
@@ -704,7 +1185,7 @@ fn check_swept_collision(
     let mesh1 = trimesh_from_buffers(v1_flat, idx1, off1)?;
     let mesh2 = trimesh_from_buffers(v2_flat, idx2, off2)?;
 
-    let res = sweep_meshes(&mesh1, &p1_start, &p1_end, &mesh2, &p2_start, &p2_end)?;
+    let res = py.detach(|| sweep_meshes(&mesh1, &p1_start, &p1_end, &mesh2, &p2_start, &p2_end))?;
 
     serde_json::to_string(&res)
         .map_err(|e| PyValueError::new_err(format!("Serialization error: {}", e)))
@@ -718,18 +1199,80 @@ fn register_mesh(
     face_offsets: Vec<i32>,
 ) -> PyResult<String> {
     let trimesh = trimesh_from_buffers(&vertices_flat, &face_indices, &face_offsets)?;
+    register_trimesh(mesh_id, trimesh)
+}
+
+fn register_trimesh(mesh_id: String, trimesh: TriMesh) -> PyResult<String> {
+    let origin_radius = trimesh
+        .vertices()
+        .iter()
+        .map(|vertex| vertex.length())
+        .fold(0.0, f64::max);
+    let mut mins = [f64::INFINITY; 3];
+    let mut maxs = [f64::NEG_INFINITY; 3];
+    for v in trimesh.vertices() {
+        for i in 0..3 {
+            mins[i] = mins[i].min(v[i]);
+            maxs[i] = maxs[i].max(v[i]);
+        }
+    }
     let registry = get_mesh_registry();
-    let mut guard = registry.lock().map_err(|e| {
+    let mut guard = registry.write().map_err(|e| {
         PyValueError::new_err(format!("Failed to acquire mesh registry lock: {}", e))
     })?;
-    guard.insert(mesh_id.clone(), trimesh);
+    guard.insert(
+        mesh_id.clone(),
+        Arc::new(RegisteredMesh {
+            mesh: trimesh,
+            origin_radius,
+            local_bounds: (mins, maxs),
+            solid_issue: OnceLock::new(),
+            solid_representatives: OnceLock::new(),
+        }),
+    );
     Ok(format!("Mesh '{}' successfully registered.", mesh_id))
+}
+
+#[pyfunction]
+fn register_mesh_buffers(
+    py: Python<'_>,
+    mesh_id: String,
+    vertices_obj: &Bound<'_, PyAny>,
+    face_indices_obj: &Bound<'_, PyAny>,
+    face_offsets_obj: &Bound<'_, PyAny>,
+) -> PyResult<String> {
+    let vertices = PyBuffer::<f64>::get(vertices_obj)
+        .map_err(|error| PyValueError::new_err(format!("vertices buffer: {error}")))?;
+    let indices = PyBuffer::<i32>::get(face_indices_obj)
+        .map_err(|error| PyValueError::new_err(format!("indices buffer: {error}")))?;
+    let offsets = PyBuffer::<i32>::get(face_offsets_obj)
+        .map_err(|error| PyValueError::new_err(format!("offsets buffer: {error}")))?;
+    let vertices = vertices
+        .as_slice(py)
+        .ok_or_else(|| PyValueError::new_err("vertices buffer must be contiguous"))?
+        .iter()
+        .map(|value| value.get())
+        .collect::<Vec<_>>();
+    let indices = indices
+        .as_slice(py)
+        .ok_or_else(|| PyValueError::new_err("indices buffer must be contiguous"))?
+        .iter()
+        .map(|value| value.get())
+        .collect::<Vec<_>>();
+    let offsets = offsets
+        .as_slice(py)
+        .ok_or_else(|| PyValueError::new_err("offsets buffer must be contiguous"))?
+        .iter()
+        .map(|value| value.get())
+        .collect::<Vec<_>>();
+    let trimesh = trimesh_from_buffers(&vertices, &indices, &offsets)?;
+    register_trimesh(mesh_id, trimesh)
 }
 
 #[pyfunction]
 fn clear_mesh_registry() -> PyResult<String> {
     let registry = get_mesh_registry();
-    let mut guard = registry.lock().map_err(|e| {
+    let mut guard = registry.write().map_err(|e| {
         PyValueError::new_err(format!("Failed to acquire mesh registry lock: {}", e))
     })?;
     guard.clear();
@@ -737,7 +1280,64 @@ fn clear_mesh_registry() -> PyResult<String> {
 }
 
 #[pyfunction]
+fn unregister_mesh(mesh_id: &str) -> PyResult<bool> {
+    let registry = get_mesh_registry();
+    let mut guard = registry.write().map_err(|error| {
+        PyValueError::new_err(format!("Failed to acquire mesh registry lock: {error}"))
+    })?;
+    Ok(guard.remove(mesh_id).is_some())
+}
+
+fn sweep_cached_impl(
+    py: Python<'_>,
+    mesh1_id: &str,
+    pose1_start_vec: &[f64],
+    pose1_end_vec: &[f64],
+    mesh2_id: &str,
+    pose2_start_vec: &[f64],
+    pose2_end_vec: &[f64],
+) -> PyResult<SweptCollisionResult> {
+    let p1_start = parse_pose(pose1_start_vec)?;
+    let p1_end = parse_pose(pose1_end_vec)?;
+    let p2_start = parse_pose(pose2_start_vec)?;
+    let p2_end = parse_pose(pose2_end_vec)?;
+
+    let registry = get_mesh_registry();
+    let guard = registry.read().map_err(|e| {
+        PyValueError::new_err(format!("Failed to acquire mesh registry lock: {}", e))
+    })?;
+
+    let mesh1 = Arc::clone(guard.get(mesh1_id).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "Mesh ID '{}' not found in registry. Please register it first.",
+            mesh1_id
+        ))
+    })?);
+
+    let mesh2 = Arc::clone(guard.get(mesh2_id).ok_or_else(|| {
+        PyValueError::new_err(format!(
+            "Mesh ID '{}' not found in registry. Please register it first.",
+            mesh2_id
+        ))
+    })?);
+    drop(guard);
+
+    py.detach(|| {
+        sweep_registered_meshes(
+            mesh1.as_ref(),
+            &p1_start,
+            &p1_end,
+            mesh2.as_ref(),
+            &p2_start,
+            &p2_end,
+            true,
+        )
+    })
+}
+
+#[pyfunction]
 fn check_swept_collision_cached(
+    py: Python<'_>,
     mesh1_id: String,
     pose1_start_vec: Vec<f64>,
     pose1_end_vec: Vec<f64>,
@@ -745,34 +1345,117 @@ fn check_swept_collision_cached(
     pose2_start_vec: Vec<f64>,
     pose2_end_vec: Vec<f64>,
 ) -> PyResult<String> {
-    let p1_start = parse_pose(&pose1_start_vec)?;
-    let p1_end = parse_pose(&pose1_end_vec)?;
-    let p2_start = parse_pose(&pose2_start_vec)?;
-    let p2_end = parse_pose(&pose2_end_vec)?;
+    let result = sweep_cached_impl(
+        py,
+        &mesh1_id,
+        &pose1_start_vec,
+        &pose1_end_vec,
+        &mesh2_id,
+        &pose2_start_vec,
+        &pose2_end_vec,
+    )?;
 
-    let registry = get_mesh_registry();
-    let guard = registry.lock().map_err(|e| {
-        PyValueError::new_err(format!("Failed to acquire mesh registry lock: {}", e))
-    })?;
-
-    let mesh1 = guard.get(&mesh1_id).ok_or_else(|| {
-        PyValueError::new_err(format!(
-            "Mesh ID '{}' not found in registry. Please register it first.",
-            mesh1_id
-        ))
-    })?;
-
-    let mesh2 = guard.get(&mesh2_id).ok_or_else(|| {
-        PyValueError::new_err(format!(
-            "Mesh ID '{}' not found in registry. Please register it first.",
-            mesh2_id
-        ))
-    })?;
-
-    let res = sweep_meshes(mesh1, &p1_start, &p1_end, mesh2, &p2_start, &p2_end)?;
-
-    serde_json::to_string(&res)
+    serde_json::to_string(&result)
         .map_err(|e| PyValueError::new_err(format!("Serialization error: {}", e)))
+}
+
+#[pyfunction]
+fn check_swept_collision_cached_native(
+    py: Python<'_>,
+    mesh1_id: String,
+    pose1_start_vec: Vec<f64>,
+    pose1_end_vec: Vec<f64>,
+    mesh2_id: String,
+    pose2_start_vec: Vec<f64>,
+    pose2_end_vec: Vec<f64>,
+) -> PyResult<Py<PyDict>> {
+    let result = sweep_cached_impl(
+        py,
+        &mesh1_id,
+        &pose1_start_vec,
+        &pose1_end_vec,
+        &mesh2_id,
+        &pose2_start_vec,
+        &pose2_end_vec,
+    )?;
+
+    swept_result_to_python(py, &result)
+}
+
+type CachedSweepInput = (String, Vec<f64>, Vec<f64>, String, Vec<f64>, Vec<f64>);
+
+struct PreparedCachedSweep {
+    mesh1: Arc<RegisteredMesh>,
+    pose1_start: Pose,
+    pose1_end: Pose,
+    mesh2: Arc<RegisteredMesh>,
+    pose2_start: Pose,
+    pose2_end: Pose,
+}
+
+#[pyfunction(signature = (queries, parallel=true, tight_bounds=true))]
+fn check_swept_collision_cached_batch_native(
+    py: Python<'_>,
+    queries: Vec<CachedSweepInput>,
+    parallel: bool,
+    tight_bounds: bool,
+) -> PyResult<Vec<Py<PyDict>>> {
+    let prepared = prepare_cached_sweeps(queries)?;
+    let execute = |query: &PreparedCachedSweep| {
+        sweep_registered_meshes(
+            query.mesh1.as_ref(),
+            &query.pose1_start,
+            &query.pose1_end,
+            query.mesh2.as_ref(),
+            &query.pose2_start,
+            &query.pose2_end,
+            tight_bounds,
+        )
+    };
+    let results = py.detach(|| {
+        if parallel {
+            prepared
+                .par_iter()
+                .map(execute)
+                .collect::<PyResult<Vec<_>>>()
+        } else {
+            prepared.iter().map(execute).collect::<PyResult<Vec<_>>>()
+        }
+    })?;
+    results
+        .iter()
+        .map(|result| swept_result_to_python(py, result))
+        .collect()
+}
+
+fn prepare_cached_sweeps(queries: Vec<CachedSweepInput>) -> PyResult<Vec<PreparedCachedSweep>> {
+    let registry = get_mesh_registry();
+    let guard = registry.read().map_err(|error| {
+        PyValueError::new_err(format!("Failed to acquire mesh registry lock: {error}"))
+    })?;
+    let mut prepared = Vec::with_capacity(queries.len());
+    for (mesh1_id, pose1_start, pose1_end, mesh2_id, pose2_start, pose2_end) in queries {
+        let mesh1 = Arc::clone(guard.get(&mesh1_id).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "Mesh ID '{mesh1_id}' not found in registry. Please register it first."
+            ))
+        })?);
+        let mesh2 = Arc::clone(guard.get(&mesh2_id).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "Mesh ID '{mesh2_id}' not found in registry. Please register it first."
+            ))
+        })?);
+        prepared.push(PreparedCachedSweep {
+            mesh1,
+            pose1_start: parse_pose(&pose1_start)?,
+            pose1_end: parse_pose(&pose1_end)?,
+            mesh2,
+            pose2_start: parse_pose(&pose2_start)?,
+            pose2_end: parse_pose(&pose2_end)?,
+        });
+    }
+    drop(guard);
+    Ok(prepared)
 }
 
 #[pyfunction]
@@ -781,6 +1464,11 @@ fn compute_assembly_contacts(
     assembly_list: Vec<Bound<'_, PyDict>>,
     tolerance: f64,
 ) -> PyResult<String> {
+    if !tolerance.is_finite() || tolerance < 0.0 {
+        return Err(PyValueError::new_err(
+            "contact tolerance must be finite and nonnegative",
+        ));
+    }
     struct MeshReconstruction {
         name: String,
         vertices: Vec<Vector>,
@@ -860,101 +1548,105 @@ fn compute_assembly_contacts(
         });
     }
 
-    let contact_interfaces = Mutex::new(Vec::new());
+    let mut results = py.detach(|| {
+        let contact_interfaces = Mutex::new(Vec::new());
+        (0..meshes.len()).into_par_iter().for_each(|i| {
+            for j in (i + 1)..meshes.len() {
+                let mesh_a = &meshes[i];
+                let mesh_b = &meshes[j];
 
-    (0..meshes.len()).into_par_iter().for_each(|i| {
-        for j in (i + 1)..meshes.len() {
-            let mesh_a = &meshes[i];
-            let mesh_b = &meshes[j];
+                let dx = (mesh_a.bbox.min_x - mesh_b.bbox.max_x)
+                    .max(mesh_b.bbox.min_x - mesh_a.bbox.max_x);
+                let dy = (mesh_a.bbox.min_y - mesh_b.bbox.max_y)
+                    .max(mesh_b.bbox.min_y - mesh_a.bbox.max_y);
+                let dz = (mesh_a.bbox.min_z - mesh_b.bbox.max_z)
+                    .max(mesh_b.bbox.min_z - mesh_a.bbox.max_z);
+                if dx > tolerance || dy > tolerance || dz > tolerance {
+                    continue;
+                }
 
-            let dx =
-                (mesh_a.bbox.min_x - mesh_b.bbox.max_x).max(mesh_b.bbox.min_x - mesh_a.bbox.max_x);
-            let dy =
-                (mesh_a.bbox.min_y - mesh_b.bbox.max_y).max(mesh_b.bbox.min_y - mesh_a.bbox.max_y);
-            let dz =
-                (mesh_a.bbox.min_z - mesh_b.bbox.max_z).max(mesh_b.bbox.min_z - mesh_a.bbox.max_z);
-
-            if dx <= tolerance && dy <= tolerance && dz <= tolerance {
                 for f_a in &mesh_a.faces {
                     let (n_a, c_a) = calculate_face_normal_and_centroid(&mesh_a.vertices, f_a);
                     if n_a.length_squared() < 1e-6 {
                         continue;
                     }
+                    let plane_deviation_a = maximum_plane_distance(&mesh_a.vertices, f_a, c_a, n_a);
 
                     for f_b in &mesh_b.faces {
-                        let (n_b, c_b) = calculate_face_normal_and_centroid(&mesh_b.vertices, f_b);
+                        let (n_b, _) = calculate_face_normal_and_centroid(&mesh_b.vertices, f_b);
                         if n_b.length_squared() < 1e-6 {
                             continue;
                         }
-
                         let normal_dot = n_a.dot(n_b);
-                        if normal_dot < -0.95 {
-                            // Enhanced proximity detection: allows non-planar/warped centroids within tolerance bounds
-                            let dist = (c_a - c_b).dot(n_a).abs();
-                            if dist <= tolerance {
-                                let u = if n_a.x.abs() > 0.1 {
-                                    Vector::new(-n_a.y, n_a.x, 0.0).normalize()
-                                } else {
-                                    Vector::new(0.0, -n_a.z, n_a.y).normalize()
-                                };
-                                let v = n_a.cross(u).normalize();
-
-                                let poly_a_2d: Vec<Point2D> = f_a
-                                    .iter()
-                                    .map(|&idx| {
-                                        let p = mesh_a.vertices[idx];
-                                        let diff = p - c_a;
-                                        Point2D {
-                                            x: diff.dot(u),
-                                            y: diff.dot(v),
-                                        }
-                                    })
-                                    .collect();
-
-                                let poly_b_2d: Vec<Point2D> = f_b
-                                    .iter()
-                                    .map(|&idx| {
-                                        let p = mesh_b.vertices[idx];
-                                        let diff = p - c_a;
-                                        Point2D {
-                                            x: diff.dot(u),
-                                            y: diff.dot(v),
-                                        }
-                                    })
-                                    .collect();
-
-                                let clipped = clip_polygon(&poly_b_2d, &poly_a_2d);
-                                if clipped.len() >= 3 {
-                                    let (area, centroid_2d) = polygon_area_and_centroid(&clipped);
-                                    if area > 1e-6 {
-                                        let centroid_3d =
-                                            c_a + u * centroid_2d.x + v * centroid_2d.y;
-                                        let mut vertices_3d = Vec::with_capacity(clipped.len());
-                                        for p_2d in &clipped {
-                                            let p_3d = c_a + u * p_2d.x + v * p_2d.y;
-                                            vertices_3d.push([p_3d.x, p_3d.y, p_3d.z]);
-                                        }
-
-                                        let mut guard = contact_interfaces.lock().unwrap();
-                                        guard.push(ContactInterface {
-                                            block_a: mesh_a.name.clone(),
-                                            block_b: mesh_b.name.clone(),
-                                            area_m2: area,
-                                            centroid: [centroid_3d.x, centroid_3d.y, centroid_3d.z],
-                                            normal: [n_a.x, n_a.y, n_a.z],
-                                            vertices_3d,
-                                        });
-                                    }
-                                }
-                            }
+                        if normal_dot > -0.999 {
+                            continue;
                         }
+                        let plane_deviation_b =
+                            maximum_plane_distance(&mesh_b.vertices, f_b, c_a, n_a);
+                        let maximum_plane_deviation = plane_deviation_a.max(plane_deviation_b);
+                        if maximum_plane_deviation > tolerance {
+                            continue;
+                        }
+
+                        let u = if n_a.x.abs() > 0.1 {
+                            Vector::new(-n_a.y, n_a.x, 0.0).normalize()
+                        } else {
+                            Vector::new(0.0, -n_a.z, n_a.y).normalize()
+                        };
+                        let v = n_a.cross(u).normalize();
+                        let (area, centroid_2d, patches) = intersect_projected_faces(
+                            &mesh_a.vertices,
+                            f_a,
+                            &mesh_b.vertices,
+                            f_b,
+                            c_a,
+                            u,
+                            v,
+                        );
+                        let area_epsilon = (tolerance * tolerance).max(f64::EPSILON);
+                        if area <= area_epsilon {
+                            continue;
+                        }
+
+                        let centroid_3d = c_a + u * centroid_2d.x + v * centroid_2d.y;
+                        let patches_3d: Vec<Vec<[f64; 3]>> = patches
+                            .iter()
+                            .map(|patch| {
+                                patch
+                                    .iter()
+                                    .map(|point| {
+                                        let point = c_a + u * point.x + v * point.y;
+                                        [point.x, point.y, point.z]
+                                    })
+                                    .collect()
+                            })
+                            .collect();
+                        let vertices_3d = patches_3d.iter().flatten().copied().collect();
+                        let classification_reliable =
+                            normal_dot <= -1.0 + 1e-8 && maximum_plane_deviation <= tolerance;
+
+                        contact_interfaces.lock().unwrap().push(ContactInterface {
+                            block_a: mesh_a.name.clone(),
+                            block_b: mesh_b.name.clone(),
+                            area,
+                            // Compatibility field. Generic meshes do not carry a unit system.
+                            area_m2: area,
+                            area_units: "mesh_units_squared".to_string(),
+                            centroid: [centroid_3d.x, centroid_3d.y, centroid_3d.z],
+                            normal: [n_a.x, n_a.y, n_a.z],
+                            normal_alignment: normal_dot,
+                            maximum_plane_deviation,
+                            classification_reliable,
+                            method: "triangulated_planar_patch_clipping".to_string(),
+                            vertices_3d,
+                            patches_3d,
+                        });
                     }
                 }
             }
-        }
+        });
+        contact_interfaces.into_inner().unwrap()
     });
-
-    let mut results = contact_interfaces.into_inner().unwrap();
     for contact in &mut results {
         if contact.block_a > contact.block_b {
             std::mem::swap(&mut contact.block_a, &mut contact.block_b);
@@ -972,15 +1664,25 @@ fn compute_assembly_contacts(
 }
 
 #[pyfunction]
-fn fix_mesh_json(json_str: &str) -> PyResult<String> {
+#[pyo3(signature = (json_str, weld_tolerance=DEFAULT_WELD_TOLERANCE))]
+fn fix_mesh_json(json_str: &str, weld_tolerance: f64) -> PyResult<String> {
+    if !weld_tolerance.is_finite() || weld_tolerance <= 0.0 {
+        return Err(PyValueError::new_err(
+            "weld_tolerance must be finite and greater than zero",
+        ));
+    }
     let mut bytes = json_str.as_bytes().to_vec();
     let mut obj: CompasDataObject = simd_json::serde::from_slice(&mut bytes)
         .map_err(|err| PyValueError::new_err(format!("Malformed COMPAS JSON Schema: {}", err)))?;
 
-    let (vertices, faces) = obj.data.get_vertices_and_faces();
+    let (vertices, faces) = obj
+        .data
+        .get_vertices_and_faces()
+        .map_err(PyValueError::new_err)?;
     validate_geometry(&vertices, &faces)?;
 
-    let (welded_vertices, welded_faces, weld_details) = weld_vertices(&vertices, &faces);
+    let (welded_vertices, welded_faces, weld_details) =
+        weld_vertices(&vertices, &faces, weld_tolerance);
     let (fixed_faces, flip_details) = unify_winding_directions(welded_faces);
 
     let welded_count = weld_details.len();
@@ -995,6 +1697,7 @@ fn fix_mesh_json(json_str: &str) -> PyResult<String> {
         .map_err(|err| PyValueError::new_err(format!("Failed to serialize fixed mesh: {}", err)))?;
 
     let report = FixedMeshReport {
+        weld_tolerance,
         welded_count,
         flipped_count,
         weld_details,
@@ -1007,12 +1710,19 @@ fn fix_mesh_json(json_str: &str) -> PyResult<String> {
 }
 
 #[pyfunction]
+#[pyo3(signature = (vertices_obj, face_indices_obj, face_offsets_obj, weld_tolerance=DEFAULT_WELD_TOLERANCE))]
 fn fix_mesh_buffers(
     py: Python<'_>,
     vertices_obj: &Bound<'_, PyAny>,
     face_indices_obj: &Bound<'_, PyAny>,
     face_offsets_obj: &Bound<'_, PyAny>,
+    weld_tolerance: f64,
 ) -> PyResult<String> {
+    if !weld_tolerance.is_finite() || weld_tolerance <= 0.0 {
+        return Err(PyValueError::new_err(
+            "weld_tolerance must be finite and greater than zero",
+        ));
+    }
     let v_buf = PyBuffer::<f64>::get(vertices_obj)
         .map_err(|e| PyValueError::new_err(format!("v buffer: {}", e)))?;
     let idx_buf = PyBuffer::<i32>::get(face_indices_obj)
@@ -1056,7 +1766,8 @@ fn fix_mesh_buffers(
         faces.push(face);
     }
 
-    let (welded_vertices, welded_faces, weld_details) = weld_vertices(&vertices, &faces);
+    let (welded_vertices, welded_faces, weld_details) =
+        weld_vertices(&vertices, &faces, weld_tolerance);
     let (fixed_faces, flip_details) = unify_winding_directions(welded_faces);
 
     let welded_count = weld_details.len();
@@ -1083,6 +1794,7 @@ fn fix_mesh_buffers(
         vertices: out_vertices,
         face_indices: out_idx,
         face_offsets: out_off,
+        weld_tolerance,
         welded_count,
         flipped_count,
         weld_details,
@@ -1101,31 +1813,20 @@ fn run_preflight_json(json_str: &str, profile: &str) -> PyResult<String> {
         PyValueError::new_err(format!("Malformed COMPAS JSON Schema (SIMD): {}", err))
     })?;
 
-    let (vertices, faces) = obj.data.get_vertices_and_faces();
+    let (vertices, faces) = obj
+        .data
+        .get_vertices_and_faces()
+        .map_err(PyValueError::new_err)?;
     validate_geometry(&vertices, &faces)?;
 
     let bbox = Aabb::from_vertices(&vertices);
     let volume_m3 = compute_mesh_volume(&vertices, &faces);
-    let boundary_edges = find_boundary_edges(&faces);
-    let boundary_edges_count = boundary_edges.len();
-    let is_watertight = !faces.is_empty()
-        && boundary_edges_count == 0
-        && find_non_manifold_edges(&faces).is_empty()
-        && geometry::find_non_manifold_vertices(&faces).is_empty();
+    let topology = mesh_topology_metrics(&vertices, &faces);
+    let boundary_edges_count = topology.boundary_edges.len();
 
     let bounds_x_dim = bbox.max_x - bbox.min_x;
     let bounds_y_dim = bbox.max_y - bbox.min_y;
     let bounds_z_dim = bbox.max_z - bbox.min_z;
-
-    let unique_edges_count = count_unique_edges(&faces);
-    let euler_characteristic =
-        (vertices.len() as i32) - (unique_edges_count as i32) + (faces.len() as i32);
-
-    let genus = if is_watertight && euler_characteristic <= 2 {
-        ((2 - euler_characteristic) / 2).max(0) as usize
-    } else {
-        0
-    };
 
     let max_planarity_deviation = compute_max_planarity_deviation(&vertices, &faces);
     let min_face_quality = compute_min_face_quality(&vertices, &faces);
@@ -1146,9 +1847,12 @@ fn run_preflight_json(json_str: &str, profile: &str) -> PyResult<String> {
     let planarity_ok = max_planarity_deviation <= 0.005;
     let mesh_quality_ok = min_face_quality >= 0.1;
 
-    let mut is_compliant =
-        fits_workspace && (estimated_mass_kg <= max_mass) && planarity_ok && mesh_quality_ok;
-    if require_watertight && !is_watertight {
+    let mut is_compliant = fits_workspace
+        && topology.volume_reliable
+        && (estimated_mass_kg <= max_mass)
+        && planarity_ok
+        && mesh_quality_ok;
+    if require_watertight && !topology.is_watertight {
         is_compliant = false;
     }
 
@@ -1161,13 +1865,19 @@ fn run_preflight_json(json_str: &str, profile: &str) -> PyResult<String> {
         profile_name: profile.to_string(),
         is_compliant,
         volume_m3,
+        volume_reliable: topology.volume_reliable,
         estimated_mass_kg,
         max_mass_kg: max_mass,
         mass_within_limit: estimated_mass_kg <= max_mass,
         requires_watertight: require_watertight,
         boundary_edges_count,
-        boundary_edges,
-        is_watertight,
+        boundary_edges: topology.boundary_edges,
+        is_watertight: topology.is_watertight,
+        winding_consistent: topology.winding_consistent,
+        degenerate_faces_count: topology.degenerate_faces_count,
+        surface_components: topology.surface_components,
+        isolated_vertices_count: topology.isolated_vertices_count,
+        self_intersections: topology.self_intersections,
         fits_workspace,
         bounds_x_dim,
         bounds_y_dim,
@@ -1175,8 +1885,8 @@ fn run_preflight_json(json_str: &str, profile: &str) -> PyResult<String> {
         bounding_box: bbox,
         vertices: vertices.clone(),
         triangulated_faces,
-        euler_characteristic,
-        genus,
+        euler_characteristic: topology.euler_characteristic,
+        genus: topology.genus,
         max_planarity_deviation,
         min_face_quality,
     };
@@ -1239,26 +1949,12 @@ fn run_preflight_buffers(
 
     let bbox = Aabb::from_vertices(&vertices);
     let volume_m3 = compute_mesh_volume(&vertices, &faces);
-    let boundary_edges = find_boundary_edges(&faces);
-    let boundary_edges_count = boundary_edges.len();
-    let is_watertight = !faces.is_empty()
-        && boundary_edges_count == 0
-        && find_non_manifold_edges(&faces).is_empty()
-        && geometry::find_non_manifold_vertices(&faces).is_empty();
+    let topology = mesh_topology_metrics(&vertices, &faces);
+    let boundary_edges_count = topology.boundary_edges.len();
 
     let bounds_x_dim = bbox.max_x - bbox.min_x;
     let bounds_y_dim = bbox.max_y - bbox.min_y;
     let bounds_z_dim = bbox.max_z - bbox.min_z;
-
-    let unique_edges_count = count_unique_edges(&faces);
-    let euler_characteristic =
-        (vertices.len() as i32) - (unique_edges_count as i32) + (faces.len() as i32);
-
-    let genus = if is_watertight && euler_characteristic <= 2 {
-        ((2 - euler_characteristic) / 2).max(0) as usize
-    } else {
-        0
-    };
 
     let max_planarity_deviation = compute_max_planarity_deviation(&vertices, &faces);
     let min_face_quality = compute_min_face_quality(&vertices, &faces);
@@ -1279,9 +1975,12 @@ fn run_preflight_buffers(
     let planarity_ok = max_planarity_deviation <= 0.005;
     let mesh_quality_ok = min_face_quality >= 0.1;
 
-    let mut is_compliant =
-        fits_workspace && (estimated_mass_kg <= max_mass) && planarity_ok && mesh_quality_ok;
-    if require_watertight && !is_watertight {
+    let mut is_compliant = fits_workspace
+        && topology.volume_reliable
+        && (estimated_mass_kg <= max_mass)
+        && planarity_ok
+        && mesh_quality_ok;
+    if require_watertight && !topology.is_watertight {
         is_compliant = false;
     }
 
@@ -1294,13 +1993,19 @@ fn run_preflight_buffers(
         profile_name: profile.to_string(),
         is_compliant,
         volume_m3,
+        volume_reliable: topology.volume_reliable,
         estimated_mass_kg,
         max_mass_kg: max_mass,
         mass_within_limit: estimated_mass_kg <= max_mass,
         requires_watertight: require_watertight,
         boundary_edges_count,
-        boundary_edges,
-        is_watertight,
+        boundary_edges: topology.boundary_edges,
+        is_watertight: topology.is_watertight,
+        winding_consistent: topology.winding_consistent,
+        degenerate_faces_count: topology.degenerate_faces_count,
+        surface_components: topology.surface_components,
+        isolated_vertices_count: topology.isolated_vertices_count,
+        self_intersections: topology.self_intersections,
         fits_workspace,
         bounds_x_dim,
         bounds_y_dim,
@@ -1308,8 +2013,8 @@ fn run_preflight_buffers(
         bounding_box: bbox,
         vertices: vertices.clone(),
         triangulated_faces,
-        euler_characteristic,
-        genus,
+        euler_characteristic: topology.euler_characteristic,
+        genus: topology.genus,
         max_planarity_deviation,
         min_face_quality,
     };
@@ -1335,7 +2040,10 @@ fn detect_clashes_json(items: Vec<(String, String)>, clearance_tolerance: f64) -
         .map(|(idx, (name, json_str))| {
             let obj: CompasDataObject = serde_json::from_str(json_str)
                 .map_err(|e| PyValueError::new_err(format!("Invalid mesh {name}: {e}")))?;
-            let (vertices, faces) = obj.data.get_vertices_and_faces();
+            let (vertices, faces) = obj
+                .data
+                .get_vertices_and_faces()
+                .map_err(|error| PyValueError::new_err(format!("Invalid mesh {name}: {error}")))?;
             validate_geometry(&vertices, &faces)?;
             Ok(SpatialPart {
                 id: idx,
@@ -1348,64 +2056,157 @@ fn detect_clashes_json(items: Vec<(String, String)>, clearance_tolerance: f64) -
         .collect::<PyResult<_>>()?;
 
     let rtree = RTree::bulk_load(parts.clone());
-    let clash_reports = Mutex::new(Vec::new());
+    let batches: Result<Vec<Vec<AssemblyClashResult>>, String> = parts
+        .par_iter()
+        .map(|part_a| {
+            let min_corner = [
+                part_a.bbox.min_x - clearance_tolerance,
+                part_a.bbox.min_y - clearance_tolerance,
+                part_a.bbox.min_z - clearance_tolerance,
+            ];
+            let max_corner = [
+                part_a.bbox.max_x + clearance_tolerance,
+                part_a.bbox.max_y + clearance_tolerance,
+                part_a.bbox.max_z + clearance_tolerance,
+            ];
+            let inflated_envelope = rstar::AABB::from_corners(min_corner, max_corner);
+            let mut reports = Vec::new();
 
-    parts.par_iter().for_each(|part_a| {
-        let min_corner = [
-            part_a.bbox.min_x - clearance_tolerance,
-            part_a.bbox.min_y - clearance_tolerance,
-            part_a.bbox.min_z - clearance_tolerance,
-        ];
-        let max_corner = [
-            part_a.bbox.max_x + clearance_tolerance,
-            part_a.bbox.max_y + clearance_tolerance,
-            part_a.bbox.max_z + clearance_tolerance,
-        ];
-        let inflated_envelope = rstar::AABB::from_corners(min_corner, max_corner);
-
-        let candidates = rtree.locate_in_envelope_intersecting(&inflated_envelope);
-        for candidate in candidates {
-            if part_a.id < candidate.id {
-                let min_dist = compute_mesh_distance(part_a, candidate).unwrap_or(0.0);
-
+            for candidate in rtree.locate_in_envelope_intersecting(inflated_envelope) {
+                if part_a.id >= candidate.id {
+                    continue;
+                }
+                let min_dist = compute_mesh_distance(part_a, candidate).map_err(|error| {
+                    format!(
+                        "mesh distance failed for '{}' and '{}': {}",
+                        part_a.name, candidate.name, error
+                    )
+                })?;
                 let has_intersection = min_dist <= 0.0;
                 let is_clearance_violation = min_dist < clearance_tolerance;
+                let (relationship, classification_reliable) = if min_dist > 1e-12 {
+                    ("separated", true)
+                } else {
+                    // Surface-mesh distance alone cannot distinguish tangential contact,
+                    // crossing surfaces, or closed-solid containment.
+                    ("surface_contact_or_intersection", false)
+                };
 
                 if has_intersection || is_clearance_violation {
-                    let mut reports = clash_reports.lock().unwrap();
                     reports.push(AssemblyClashResult {
                         part_a: part_a.name.clone(),
                         part_b: candidate.name.clone(),
                         has_intersection,
+                        relationship: relationship.to_string(),
+                        classification_reliable,
                         minimum_distance: min_dist,
                         is_clearance_violation,
                     });
                 }
             }
-        }
+            Ok(reports)
+        })
+        .collect();
+    let mut results: Vec<AssemblyClashResult> = batches
+        .map_err(PyValueError::new_err)?
+        .into_iter()
+        .flatten()
+        .collect();
+    results.sort_by(|a, b| {
+        a.part_a
+            .cmp(&b.part_a)
+            .then_with(|| a.part_b.cmp(&b.part_b))
     });
-
-    let results = clash_reports.into_inner().unwrap();
     serde_json::to_string(&results).map_err(|err| {
         PyValueError::new_err(format!("Serialization error during clash phase: {}", err))
     })
 }
 
+#[cfg(feature = "bench-support")]
+pub mod bench_support {
+    use super::*;
+
+    static CUBE: OnceLock<TriMesh> = OnceLock::new();
+
+    fn retained_cube() -> &'static TriMesh {
+        CUBE.get_or_init(|| {
+            let vertices = vec![
+                Vector::new(-0.5, -0.5, -0.5),
+                Vector::new(0.5, -0.5, -0.5),
+                Vector::new(0.5, 0.5, -0.5),
+                Vector::new(-0.5, 0.5, -0.5),
+                Vector::new(-0.5, -0.5, 0.5),
+                Vector::new(0.5, -0.5, 0.5),
+                Vector::new(0.5, 0.5, 0.5),
+                Vector::new(-0.5, 0.5, 0.5),
+            ];
+            let triangles = vec![
+                [0, 3, 2],
+                [0, 2, 1],
+                [4, 5, 6],
+                [4, 6, 7],
+                [0, 1, 5],
+                [0, 5, 4],
+                [1, 2, 6],
+                [1, 6, 5],
+                [2, 3, 7],
+                [2, 7, 6],
+                [3, 0, 4],
+                [3, 4, 7],
+            ];
+            TriMesh::new(vertices, triangles).expect("static cube must be a valid triangle mesh")
+        })
+    }
+
+    /// Native retained-geometry fixture used only by Criterion.
+    ///
+    /// This excludes Python conversion, JSON and mesh construction. The result
+    /// keeps a correctness value so benchmark runs cannot silently time a no-op.
+    pub fn retained_cube_linear_hit() -> (bool, f64) {
+        let mesh = retained_cube();
+        let start = Pose {
+            rotation: Rotation::from_xyzw(0.0, 0.0, 0.0, 1.0),
+            translation: Vector::new(-2.0, 0.0, 0.0),
+        };
+        let end = Pose {
+            rotation: Rotation::from_xyzw(0.0, 0.0, 0.0, 1.0),
+            translation: Vector::new(2.0, 0.0, 0.0),
+        };
+        let fixed = Pose::identity();
+        let result = sweep_meshes(mesh, &start, &end, mesh, &fixed, &fixed)
+            .expect("static benchmark query must be supported");
+        (result.has_collision, result.time_of_impact.unwrap_or(-1.0))
+    }
+}
+
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(
+        clearance::verify_clearance_cached_batch_native,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(validate_compas_json, m)?)?;
     m.add_function(wrap_pyfunction!(fix_mesh_json, m)?)?;
     m.add_function(wrap_pyfunction!(run_preflight_json, m)?)?;
     m.add_function(wrap_pyfunction!(detect_clashes_json, m)?)?;
     m.add_function(wrap_pyfunction!(validate_mesh_buffers, m)?)?;
+    m.add_function(wrap_pyfunction!(scan_mesh_buffers_borrowed, m)?)?;
+    m.add_function(wrap_pyfunction!(topology_predicates_buffers, m)?)?;
     m.add_function(wrap_pyfunction!(check_swept_collision, m)?)?;
     m.add_function(wrap_pyfunction!(compute_assembly_contacts, m)?)?;
     m.add_function(wrap_pyfunction!(fix_mesh_buffers, m)?)?;
     m.add_function(wrap_pyfunction!(run_preflight_buffers, m)?)?;
 
     m.add_function(wrap_pyfunction!(register_mesh, m)?)?;
+    m.add_function(wrap_pyfunction!(register_mesh_buffers, m)?)?;
     m.add_function(wrap_pyfunction!(clear_mesh_registry, m)?)?;
+    m.add_function(wrap_pyfunction!(unregister_mesh, m)?)?;
     m.add_function(wrap_pyfunction!(check_swept_collision_cached, m)?)?;
+    m.add_function(wrap_pyfunction!(check_swept_collision_cached_native, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        check_swept_collision_cached_batch_native,
+        m
+    )?)?;
 
     Ok(())
 }

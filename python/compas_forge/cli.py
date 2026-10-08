@@ -57,11 +57,22 @@ def check(filepath):
         dup_color = "red" if report["duplicate_vertices"] > 0 else "green"
         dup_status = "FAIL" if report["duplicate_vertices"] > 0 else "PASS"
         table.add_row("Duplicate Vertices", str(report["duplicate_vertices"]), f"[{dup_color}]{dup_status}[/{dup_color}]")
+        table.add_row("Duplicate Tolerance", f"{report['duplicate_tolerance']:.3e}", "[green]INFO[/green]")
 
         nm_count = len(report["non_manifold_edges"])
         nm_color = "red" if nm_count > 0 else "green"
         nm_status = "FAIL" if nm_count > 0 else "PASS"
         table.add_row("Non-Manifold Edges", str(nm_count), f"[{nm_color}]{nm_status}[/{nm_color}]")
+
+        degenerate_count = report["degenerate_faces_count"]
+        degenerate_status = "[red]FAIL[/red]" if degenerate_count else "[green]PASS[/green]"
+        table.add_row("Degenerate Faces", str(degenerate_count), degenerate_status)
+
+        intersection_count = len(report["self_intersections"])
+        intersection_status = "[red]FAIL[/red]" if intersection_count else "[green]PASS[/green]"
+        table.add_row("Self-Intersecting Face Pairs", str(intersection_count), intersection_status)
+        winding_status = "[green]PASS[/green]" if report["winding_consistent"] else "[red]FAIL[/red]"
+        table.add_row("Consistent Winding", str(report["winding_consistent"]), winding_status)
 
         bbox = report["bounding_box"]
         x_dim = bbox["max_x"] - bbox["min_x"]
@@ -116,11 +127,13 @@ def preflight(filepath, profile, report_out):
         table.add_column("Calculated Metric", style="magenta")
         table.add_column("Compliance Status", style="bold")
 
-        table.add_row("Solid Mesh Volume", f"{preflight_data['volume_m3']:.6f} m³", "[green]CALCULATED[/green]")
+        volume_reliable = preflight_data["volume_reliable"]
+        volume_status = "[green]VERIFIED[/green]" if volume_reliable else "[yellow]UNRELIABLE[/yellow]"
+        table.add_row("Solid Mesh Volume", f"{preflight_data['volume_m3']:.6f} m³", volume_status)
         
         mass_limit_fail = not preflight_data["mass_within_limit"]
-        mass_color = "red" if mass_limit_fail else "green"
-        mass_status = "FAIL" if mass_limit_fail else "PASS"
+        mass_color = "yellow" if not volume_reliable else ("red" if mass_limit_fail else "green")
+        mass_status = "UNRELIABLE" if not volume_reliable else ("FAIL" if mass_limit_fail else "PASS")
         table.add_row(f"Estimated Net Mass (limit {preflight_data['max_mass_kg']:g} kg)", f"{preflight_data['estimated_mass_kg']:.3f} kg", f"[{mass_color}]{mass_status}[/{mass_color}]")
         
         workspace_status = "[green]PASS[/green]" if preflight_data["fits_workspace"] else "[red]FAIL[/red]"
@@ -302,6 +315,7 @@ def swept(mesh_a_path, pose_a_start_str, pose_a_end_str, mesh_b_path, pose_b_sta
             table.add_row("Converged", str(impact["converged"]))
             table.add_row("Conservative estimate", str(impact["conservative"]))
             table.add_row("Impact geometry reliable", str(impact["geometry_reliable"]))
+            table.add_row("Verification distance", str(impact["verification_distance"]))
             table.add_row("Impact Normal A (world)", str(impact["normal_a_world"]))
             table.add_row("Impact Point A (world)", str(impact["witness_a_world"]))
             table.add_row("Impact Point B (world)", str(impact["witness_b_world"]))
@@ -354,6 +368,70 @@ def contacts(files, tolerance):
     except Exception as e:
         console.print(f"[bold red]Assembly contact solver failed:[/bold red] {e}")
         sys.exit(2)
+
+
+@main.command('trajectory')
+@click.argument('filepath', type=click.Path(exists=True,dir_okay=False,readable=True))
+@click.option('--clearance', required=True, type=float, help='Requested distance in input model length units.')
+@click.option('--articulated-tolerance', type=float, default=None,
+              help='Bound linear-joint interpolation error, including fixed-state attachments.')
+@click.option('--solid', is_flag=True, help='Require the restricted single-shell solid contract.')
+@click.option('--solid-rule', type=click.Choice(['single_shell','even_odd']), default='single_shell',
+              help='Explicit shell fill rule; even_odd requires --solid.')
+@click.option('--max-articulated-refinements', type=click.IntRange(0,8), default=2,
+              help='Local bisection depth for unresolved bounded joint intervals.')
+@click.option('--max-evaluations', type=click.IntRange(min=1), default=4096, show_default=True)
+@click.option('--max-subdivisions', type=click.IntRange(min=1), default=128, show_default=True)
+@click.option('--serial', is_flag=True, help='Disable native query parallelism.')
+def trajectory_check(filepath,clearance,articulated_tolerance,solid,max_evaluations,max_subdivisions,serial,
+                     solid_rule,max_articulated_refinements):
+    """Check a trusted COMPAS JSON bundle containing cell, state and trajectory.
+
+    Collision meshes must already be embedded/loaded; no implicit mesh downloads.
+    JSON report is written to stdout. Exit 0=clear, 1=violation, 2=input/runtime
+    error, 3=unknown. This command never sends motion to a robot/controller.
+    """
+    import hashlib
+    import platform
+    from pathlib import Path
+    try:
+        import compas
+        import compas_fab
+        import compas_forge
+        from compas_forge import _core
+        from compas_fab.robots import RobotCell,RobotCellState,JointTrajectory
+        raw = Path(filepath).read_bytes()
+        bundle = compas.json_loads(raw.decode('utf-8'))
+        if not isinstance(bundle,dict):
+            raise ValueError('bundle must contain cell, state and trajectory')
+        unsupported = set(bundle)-{'cell','state','trajectory','scene_poses','tool_trajectories'}
+        if unsupported:
+            raise ValueError('unsupported bundle fields (not silently ignored): '+', '.join(sorted(unsupported)))
+        for key,expected in [('cell',RobotCell),('state',RobotCellState),('trajectory',JointTrajectory)]:
+            if not isinstance(bundle.get(key),expected):
+                raise ValueError(f'{key} must be a serialized {expected.__name__}')
+        with compas_forge.prepare_compas_fab_cell(bundle['cell'],bundle['state']) as prepared:
+            result = prepared.verify_clearance(bundle['trajectory'],clearance,
+                articulated_tolerance=articulated_tolerance,solid=solid,
+                solid_rule=solid_rule,max_articulated_refinements=max_articulated_refinements,
+                scene_poses=bundle.get('scene_poses'),
+                tool_trajectories=bundle.get('tool_trajectories'),
+                max_evaluations=max_evaluations,max_subdivisions=max_subdivisions,parallel=not serial)
+        package_dir = Path(compas_forge.__file__).parent
+        implementation_paths = {name:package_dir/name for name in ['__init__.py','cell.py','motion_bounds.py','cli.py']}
+        implementation_paths['native_extension'] = Path(_core.__file__)
+        report = dict(schema_version=1,input_sha256=hashlib.sha256(raw).hexdigest(),
+            implementation_sha256={name:hashlib.sha256(path.read_bytes()).hexdigest()
+                                   for name,path in implementation_paths.items()},
+            versions=dict(python=platform.python_version(),compas=compas.__version__,
+                          compas_fab=compas_fab.__version__,compas_forge=compas_forge.__version__),
+            distance_units='input_model_length_units',robot_commands_sent=False,result=result)
+        output = json.dumps(report,indent=2,allow_nan=False)
+    except Exception as error:
+        click.echo(f'Trajectory preflight failed: {error}',err=True)
+        raise click.exceptions.Exit(2) from error
+    click.echo(output)
+    raise click.exceptions.Exit({'clear':0,'violation':1,'unknown':3}[result['status']])
 
 
 if __name__ == '__main__':

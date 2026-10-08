@@ -7,11 +7,10 @@ between them, demonstrating the failure mode that endpoint-only checking misses.
 import math
 import time
 
-import compas_fab
 from compas.datastructures import Mesh
 from compas.geometry import Frame
-from compas_fab.robots import JointTrajectory, JointTrajectoryPoint, Robot
-from compas_robots import Configuration, RobotModel
+from compas_fab.robots import JointTrajectory, JointTrajectoryPoint, RobotCellLibrary
+from compas_robots import Configuration
 
 import compas_forge
 
@@ -31,15 +30,14 @@ def cube_mesh(size):
 
 
 def run_example():
-    urdf = compas_fab.get("universal_robot/ur_description/urdf/ur5.urdf")
-    robot = Robot(RobotModel.from_urdf_file(urdf))
-    names = robot.get_configurable_joint_names()
+    robot, _ = RobotCellLibrary.ur5()
+    names = robot.robot_model.get_configurable_joint_names()
     start_values = [0.0, -math.pi / 2.0, 0.0, -math.pi / 2.0, 0.0, 0.0]
     end_values = [math.pi / 2.0, -math.pi / 2.0, 0.0, -math.pi / 2.0, 0.0, 0.0]
     start = Configuration.from_revolute_values(start_values, names)
     end = Configuration.from_revolute_values(end_values, names)
-    start_frame = robot.forward_kinematics(start, options={"solver": "model"})
-    end_frame = robot.forward_kinematics(end, options={"solver": "model"})
+    start_frame = robot.robot_model.forward_kinematics(start)
+    end_frame = robot.robot_model.forward_kinematics(end)
 
     tool = cube_mesh(0.04)
     obstacle = cube_mesh(0.08)

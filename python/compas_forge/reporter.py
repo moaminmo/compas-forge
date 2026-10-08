@@ -1,5 +1,11 @@
 import os
 import json
+from html import escape
+
+
+def _script_json(value):
+    """Serialize data without letting an HTML parser terminate the script."""
+    return json.dumps(value, allow_nan=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 def generate_html_report(diagnostics: dict, preflight: dict, repairs: dict, timing: dict, filepath: str):
     """
@@ -19,8 +25,8 @@ def generate_html_report(diagnostics: dict, preflight: dict, repairs: dict, timi
     for log in repairs.get("weld_details", []):
         weld_rows += f"""
         <tr class="border-b border-gray-100 hover:bg-gray-50">
-            <td class="px-6 py-3 text-sm text-red-600 font-mono">{log['old_index']}</td>
-            <td class="px-6 py-3 text-sm text-green-600 font-mono">{log['merged_into']}</td>
+            <td class="px-6 py-3 text-sm text-red-600 font-mono">{escape(str(log['old_index']))}</td>
+            <td class="px-6 py-3 text-sm text-green-600 font-mono">{escape(str(log['merged_into']))}</td>
             <td class="px-6 py-3 text-sm text-gray-600 font-mono">[{log['coordinates'][0]:.4f}, {log['coordinates'][1]:.4f}, {log['coordinates'][2]:.4f}]</td>
         </tr>
         """
@@ -31,9 +37,9 @@ def generate_html_report(diagnostics: dict, preflight: dict, repairs: dict, timi
     for log in repairs.get("flip_details", []):
         flip_rows += f"""
         <tr class="border-b border-gray-100 hover:bg-gray-50">
-            <td class="px-6 py-3 text-sm text-gray-800 font-mono">{log['face_index']}</td>
-            <td class="px-6 py-3 text-sm text-red-600 font-mono">{log['old_winding']}</td>
-            <td class="px-6 py-3 text-sm text-green-600 font-mono">{log['new_winding']}</td>
+            <td class="px-6 py-3 text-sm text-gray-800 font-mono">{escape(str(log['face_index']))}</td>
+            <td class="px-6 py-3 text-sm text-red-600 font-mono">{escape(str(log['old_winding']))}</td>
+            <td class="px-6 py-3 text-sm text-green-600 font-mono">{escape(str(log['new_winding']))}</td>
         </tr>
         """
     if not flip_rows:
@@ -47,7 +53,7 @@ def generate_html_report(diagnostics: dict, preflight: dict, repairs: dict, timi
         timeline_html += f"""
         <div class="space-y-1">
             <div class="flex justify-between text-xs font-semibold text-gray-600">
-                <span>{step.replace('_', ' ').title()}</span>
+                <span>{escape(step.replace('_', ' ').title())}</span>
                 <span class="font-mono text-indigo-600">{ms:.3f} ms ({percentage:.1f}%)</span>
             </div>
             <div class="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
@@ -364,27 +370,27 @@ def generate_html_report(diagnostics: dict, preflight: dict, repairs: dict, timi
     html_content = html_template \
         .replace("__VOLUME_M3__", f"{preflight.get('volume_m3', 0.0):.6f}") \
         .replace("__ESTIMATED_MASS__", f"{preflight.get('estimated_mass_kg', 0.0):.3f}") \
-        .replace("__BOUNDARY_EDGES_COUNT__", str(preflight.get('boundary_edges_count', 0))) \
-        .replace("__VERTEX_COUNT__", str(diagnostics.get('vertex_count', 0))) \
-        .replace("__FACE_COUNT__", str(diagnostics.get('face_count', 0))) \
-        .replace("__EULER_CHARACTERISTIC__", str(preflight.get('euler_characteristic', 2))) \
-        .replace("__GENUS__", str(preflight.get('genus', 0))) \
+        .replace("__BOUNDARY_EDGES_COUNT__", escape(str(preflight.get('boundary_edges_count', 0)))) \
+        .replace("__VERTEX_COUNT__", escape(str(diagnostics.get('vertex_count', 0)))) \
+        .replace("__FACE_COUNT__", escape(str(diagnostics.get('face_count', 0)))) \
+        .replace("__EULER_CHARACTERISTIC__", escape(str(preflight.get('euler_characteristic', 2)))) \
+        .replace("__GENUS__", escape(str(preflight.get('genus', 0)))) \
         .replace("__MAX_PLANARITY__", f"{preflight.get('max_planarity_deviation', 0.0):.6f}") \
         .replace("__MIN_QUALITY__", f"{preflight.get('min_face_quality', 1.0):.4f}") \
         .replace("__TIMELINE_HTML__", timeline_html) \
         .replace("__TOTAL_TIME__", f"{total_time:.3f}") \
-        .replace("__WELD_COUNT__", str(repairs.get('welded_count', 0))) \
+        .replace("__WELD_COUNT__", escape(str(repairs.get('welded_count', 0)))) \
         .replace("__WELD_ROWS__", weld_rows) \
-        .replace("__FLIP_COUNT__", str(repairs.get('flipped_count', 0))) \
+        .replace("__FLIP_COUNT__", escape(str(repairs.get('flipped_count', 0)))) \
         .replace("__FLIP_ROWS__", flip_rows) \
-        .replace("__VERTICES_JSON__", json.dumps(vertices_data)) \
-        .replace("__FACES_JSON__", json.dumps(faces_data)) \
-        .replace("__BOUNDARY_EDGES_JSON__", json.dumps(boundary_edges_data)) \
-        .replace("__IS_COMPLIANT_JSON__", json.dumps(preflight.get("is_compliant", False))) \
+        .replace("__VERTICES_JSON__", _script_json(vertices_data)) \
+        .replace("__FACES_JSON__", _script_json(faces_data)) \
+        .replace("__BOUNDARY_EDGES_JSON__", _script_json(boundary_edges_data)) \
+        .replace("__IS_COMPLIANT_JSON__", _script_json(preflight.get("is_compliant", False))) \
         .replace("__BOUNDS_X__", f"{preflight.get('bounds_x_dim', 0.0):.3f}") \
         .replace("__BOUNDS_Y__", f"{preflight.get('bounds_y_dim', 0.0):.3f}") \
         .replace("__BOUNDS_Z__", f"{preflight.get('bounds_z_dim', 0.0):.3f}") \
-        .replace("__PROFILE_NAME__", preflight.get('profile_name', ''))
+        .replace("__PROFILE_NAME__", escape(str(preflight.get('profile_name', ''))))
 
     # Injecting badges and icon conditions dynamically
     badge_style = f"bg-{preflight_color}-100 text-{preflight_color}-800 border border-{preflight_color}-200"

@@ -1,0 +1,73 @@
+{
+  "passed": true,
+  "python": "3.13.13",
+  "versions": {
+    "compas-forge": "0.4.0",
+    "compas": "2.15.1",
+    "compas-fab": "2.0.1",
+    "compas-robots": "1.0.1"
+  },
+  "package_path": "D:\\new\\New folder (9)\\apply\\github\\Moradi_GitHub_9_Repositories_Final\\compas-forge\\target\\consumer-audit-cp313\\Lib\\site-packages\\compas_forge\\__init__.py",
+  "native_sha256": "7e916714d066b28d554a9d01fd1d32eae1396cce6b423f642ca311b4f9862ec5",
+  "adapter_sha256": {
+    "cell.py": "6a38d16de21a523cf6879fa86082c5146824545f8d2224bcbb7b649ac9a89dc0",
+    "motion_bounds.py": "e1bb8b0c8438391d725cbe01dffa8d5bf403a9d7811a1a9b31aae4634db2358a",
+    "phases.py": "43475e2423256e2560d2dc7fd8d47afd84607278ae65a0a16a5626217e5b925d"
+  },
+  "topology": {
+    "is_closed": true,
+    "is_manifold": true,
+    "boundary_edges_count": 0,
+    "non_manifold_edges": [],
+    "non_manifold_vertices": [],
+    "isolated_vertices_count": 0
+  },
+  "trajectory": {
+    "status": "clear",
+    "entity_a": null,
+    "entity_b": null,
+    "segment_result": null,
+    "distance_evaluations": 22,
+    "refinement_pair_queries": 0,
+    "broadphase_rejections": 120,
+    "fk_evaluations": 5,
+    "evaluated_pair_queries": 124,
+    "pair_counts": {
+      "body_body": 1,
+      "robot_body": 13,
+      "robot_self": 10,
+      "robot_tool": 6,
+      "tool_body": 1
+    },
+    "motion_model": "bounded_linear_joint_path",
+    "maximum_link_deviation_bound": 0.00061494031838247,
+    "articulated_tolerance": 0.001,
+    "motion_allowance_policy": "sum_of_pair_entity_bounds",
+    "witness_time_from_start": null,
+    "clearance": 0.001,
+    "numerical_margin": 1e-08,
+    "time_tolerance": 1e-05,
+    "max_evaluations": 4096,
+    "solid": false,
+    "solid_rule": "single_shell",
+    "max_articulated_refinements": 2,
+    "moving_scene_entities": [],
+    "scene_motion_model": "synchronized_linear_translation_shortest_arc_rotation",
+    "moving_tool_joint_models": [],
+    "bounded_entities": [
+      "body:beam",
+      "body:floor",
+      "link:base_link_inertia",
+      "link:forearm_link",
+      "link:shoulder_link",
+      "link:upper_arm_link",
+      "link:wrist_1_link",
+      "link:wrist_2_link",
+      "link:wrist_3_link",
+      "tool:gripper"
+    ],
+    "numerical_error_bound_proven": false,
+    "distance_semantics": "surface_distance_not_solid_containment"
+  },
+  "robot_commands_sent": false
+}

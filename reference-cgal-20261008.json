@@ -1,0 +1,370 @@
+{
+  "schema_version": 1,
+  "scope": "static triangulated boxes; boundary vs solid semantics",
+  "cgal_version": "0.10.0",
+  "cases": 36,
+  "mismatches": 0,
+  "native_sha256": "b76db4070308f22c936cbaf7d3b104f2811d0b3e654669784210048cb0a8e169",
+  "rows": [
+    {
+      "scale": 0.001,
+      "angle": 0.0,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.0,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.0,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.2,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.2,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.2,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.55,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.55,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.55,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.9,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.9,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 0.001,
+      "angle": 0.9,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.0,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.0,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.0,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.2,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.2,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.2,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.55,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.55,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.55,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.9,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.9,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1.0,
+      "angle": 0.9,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.0,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.0,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.0,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.2,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.2,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.2,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.55,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.55,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.55,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.9,
+      "case": "separated",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": false,
+      "forge_surface": "clear",
+      "forge_solid": "clear",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.9,
+      "case": "crossing",
+      "cgal_boundary_intersection": true,
+      "cgal_solid_overlap": true,
+      "forge_surface": "violation",
+      "forge_solid": "violation",
+      "agrees": true
+    },
+    {
+      "scale": 1000.0,
+      "angle": 0.9,
+      "case": "contained",
+      "cgal_boundary_intersection": false,
+      "cgal_solid_overlap": true,
+      "forge_surface": "clear",
+      "forge_solid": "violation",
+      "agrees": true
+    }
+  ]
+}
