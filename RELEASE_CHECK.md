@@ -1,8 +1,15 @@
 # Final local release review — 8 October 2026
 
-COMPAS Forge 0.4.0 is an **unpublished research release candidate**. No commit,
-push, tag, upload or robot command was performed. Publication needs owner
-approval; local success is not remote GitHub CI success or safety certification.
+COMPAS Forge 0.4.0 is a **research release candidate**. The owner approved
+GitHub publication and the source was pushed. Binary release is gated on CI;
+no robot command was performed. Local success is not remote GitHub CI success
+or safety certification. Local audit statements below predate publication.
+
+The first remote run exposed two distribution issues: unconditional PyO3
+`extension-module` prevented Unix Rust tests from linking libpython, and
+manylinux did not automatically select the setup-python matrix interpreter.
+The build now follows PyO3's Maturin-managed extension flag (Maturin >=1.9.4)
+and selects the matrix interpreter explicitly. CI must pass after these fixes.
 
 ## Executed gates
 

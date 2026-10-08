@@ -1,5 +1,5 @@
 [build-system]
-requires = ["maturin>=1.5,<2.0"]
+requires = ["maturin>=1.9.4,<2.0"]
 build-backend = "maturin"
 
 [project]
@@ -51,6 +51,5 @@ Issues = "https://github.com/moaminmo/compas-forge/issues"
 compas_forge = "compas_forge.plugin"
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "compas_forge._core"

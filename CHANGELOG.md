@@ -2,6 +2,10 @@
 
 ## Unreleased — local presentation hardening
 
+- Publication CI fixes: use Maturin's extension-build environment instead of
+  unconditional PyO3 extension-module linking, and request each manylinux
+  matrix interpreter explicitly; source installation requires Maturin >=1.9.4.
+
 - Final release review: reject bool/float/nonfinite subdivision and worker
   budgets consistently; added 12 regression cases.
 - Escape HTML report text and script-embedded JSON; reject nonfinite JSON.

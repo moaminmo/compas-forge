@@ -37,7 +37,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist
+          args: --release --locked --out dist -i ${{ runner.os == 'Linux' && format('python{0}', matrix.python) || 'python' }}
           manylinux: auto
           sccache: true
       - name: Install wheel and current integration dependencies

@@ -4,8 +4,9 @@ Rust-backed mesh QA and trajectory preflight for COMPAS and COMPAS FAB 2.
 Check geometry and a planned path before a downstream fabrication handoff;
 retain the diagnostics, exclusions, assumptions and unresolved results.
 
-**0.4.0 local release candidate · MIT · research software.** Not yet published
-or certified for physical robot safety. Passing these checks does not authorize
+**0.4.0 research release candidate · MIT.** Source is available on GitHub;
+binary release validation is in progress. Not certified for physical robot safety.
+Passing these checks does not authorize
 execution on a robot.
 
 ## What Forge adds
