@@ -1,6 +1,7 @@
 # Source candidate and practical use
 
-Current version: **0.4.0, unpublished local research candidate**.
+Current version: **0.4.0, published GitHub research prerelease `v0.4.0-rc.1`**.
+Download matching wheels from [the release](https://github.com/moaminmo/compas-forge/releases/tag/v0.4.0-rc.1).
 The authoritative current gates are in [RELEASE_CHECK.md](RELEASE_CHECK.md).
 Historical audit reports preserve the state and hashes of their own runs.
 
@@ -39,7 +40,7 @@ an exact floating-point distance-error bound. Physical margins need laboratory
 data. A `clear` result is conditional on the documented geometry/motion contracts.
 
 CLI/JSON require no visualization server. Interactive HTML currently needs
-internet assets. Full GH component-graph testing, remote cross-platform CI and
+internet assets. Remote cross-platform CI passed. Full GH component-graph testing and
 physical lab acceptance remain open gates. General solid Boolean union,
 controller blending, grasp mechanics and multi-robot trajectories are not claimed.
 
@@ -47,8 +48,9 @@ controller blending, grasp mechanics and multi-robot trajectories are not claime
 
 - Inspect source, documentation, licensing and all new artifacts; preserve
   third-party attribution and historical `SOURCE_SHA256.json`.
-- Publish only after owner approval; no commit/push/tag has been performed here.
-- Run remote CI before a release tag, and distribute matching audited wheels
+- This prerelease was published with owner approval; commits, push and tag are
+  recorded in [PUBLICATION_20261008.md](PUBLICATION_20261008.md).
+- Run remote CI before future release tags, and distribute matching audited wheels
   rather than requiring Rhino users to build a Rust extension themselves.
 - Identify the exact commit and binary artifacts in reproducibility material.
 - Do not claim maintainer acceptance, a DOI/paper, safety certification,

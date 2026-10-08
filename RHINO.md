@@ -1,5 +1,10 @@
 # Rhino installation and verification
 
+The [GitHub prerelease](https://github.com/moaminmo/compas-forge/releases/tag/v0.4.0-rc.1)
+contains matching Windows wheels. The actual GitHub-built artifacts passed in
+Rhino 8/9; current reports are `rhino8-github-release-20261008.json` and
+`rhino9-github-release-20261008.json`. Full GH graph/recompute remains unverified.
+
 The 2026-10-08 audit exercised actual Windows Rhino 8 and Rhino 9 hosts, including
 tight bounds, solid containment, per-pair offsets and a moving FAB cell path.
 See HARDENING_20261008.md and the recorded host JSON results.

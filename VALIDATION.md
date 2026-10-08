@@ -1,5 +1,15 @@
 # Validation
 
+## Published GitHub artifact validation — 2026-10-08
+
+Research prerelease `v0.4.0-rc.1` is published. Both remote runs passed all jobs:
+15 CI checks and 17 distribution checks, including full installed-wheel suites.
+GitHub Windows `cp39` and `cp313` binaries also passed inside Rhino 8/9,
+with native SHA-256 equality checked against the downloaded artifacts:
+`rhino8-github-release-20261008.json`, `rhino9-github-release-20261008.json`.
+See [PUBLICATION_20261008.md](PUBLICATION_20261008.md) for links and remaining scope.
+Earlier sections retain their original build identities and audit dates.
+
 ## Final release review — 2026-10-08
 
 Final installed Windows wheels: CPython 3.9 **201 passed, 1 skipped**;

@@ -4,8 +4,10 @@ Rust-backed mesh QA and trajectory preflight for COMPAS and COMPAS FAB 2.
 Check geometry and a planned path before a downstream fabrication handoff;
 retain the diagnostics, exclusions, assumptions and unresolved results.
 
-**0.4.0 research release candidate · MIT.** Source is available on GitHub;
-binary release validation is in progress. Not certified for physical robot safety.
+**[0.4.0 research prerelease](https://github.com/moaminmo/compas-forge/releases/tag/v0.4.0-rc.1) · MIT.**
+16 platform/ABI wheels and a source archive are available. All 32 release CI
+jobs passed; GitHub-built Windows wheels also passed inside Rhino 8/9.
+See [publication evidence](PUBLICATION_20261008.md). Not certified for physical robot safety.
 Passing these checks does not authorize
 execution on a robot.
 
@@ -42,8 +44,9 @@ python examples/consumer_install_check.py
 compas-forge --help
 ```
 
-The wheel command is an example filename, not a claim that a public wheel has
-already been uploaded. Rhino needs its embedded CPython ABI, not IronPython.
+Download the matching wheel from the linked GitHub prerelease. The command
+uses the actual Windows CPython 3.13 asset name; no PyPI upload is claimed.
+Rhino needs its embedded CPython ABI, not IronPython.
 Prepared contexts must be closed and recreated when geometry/state changes.
 All geometry in a cell must use consistent units; fabrication profiles use metres.
 
@@ -61,8 +64,8 @@ versus Python or COMPAS**. [Raw evidence](benchmark-clearance-filter-reviewed-20
 
 The [Persian review](REVIEW_FA_20261008.md) and
 [technical Q&A](TECHNICAL_QA_FA.md) explain the contribution and limitations.
-Cross-platform remote CI, full GH graph testing and physical lab acceptance
-remain release gates. HTML's interactive viewer currently needs internet/CDN
+Cross-platform CI passed for the released source. Full GH graph testing and
+physical lab acceptance remain open gates. HTML's interactive viewer currently needs internet/CDN
 access; JSON and CLI results do not.
 
 <!-- publication-example -->
@@ -109,7 +112,7 @@ flowchart LR
 Use CPython 3.11 or later for development and a recent stable Rust toolchain.
 Python 3.9 remains supported specifically for Rhino 8. The local audit built
 and imported Windows wheels with CPython 3.9, 3.13 and 3.14; the full
-Linux/Windows/macOS matrix still has to pass on GitHub Actions.
+Linux/Windows/macOS CI matrix passed on GitHub Actions for the released source.
 
 ```sh
 python -m venv .venv
@@ -365,4 +368,4 @@ Copyright Mohammad Amin Moradi. Distributed under the [MIT License](LICENSE).
 ## Current source release
 
 [Current release checks](RELEASE_CHECK.md) - locally reviewed 8 October 2026;
-research release candidate, pending approved publication and remote CI.
+published research prerelease; see [publication record](PUBLICATION_20261008.md).

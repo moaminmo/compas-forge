@@ -1,15 +1,16 @@
 # Final local release review — 8 October 2026
 
-COMPAS Forge 0.4.0 is a **research release candidate**. The owner approved
-GitHub publication and the source was pushed. Binary release is gated on CI;
-no robot command was performed. Local success is not remote GitHub CI success
-or safety certification. Local audit statements below predate publication.
+COMPAS Forge 0.4.0 is a **published GitHub research prerelease**, tagged
+`v0.4.0-rc.1`. Both remote runs passed: 15 CI jobs and 17 distribution jobs.
+16 wheels, one sdist and two actual-host reports are published with verified
+SHA-256 correspondence. See [PUBLICATION_20261008.md](PUBLICATION_20261008.md).
+No robot command was performed; CI success is not safety certification.
 
 The first remote run exposed two distribution issues: unconditional PyO3
 `extension-module` prevented Unix Rust tests from linking libpython, and
 manylinux did not automatically select the setup-python matrix interpreter.
 The build now follows PyO3's Maturin-managed extension flag (Maturin >=1.9.4)
-and selects the matrix interpreter explicitly. CI must pass after these fixes.
+and selects the matrix interpreter explicitly. CI passed after these fixes.
 
 ## Executed gates
 
@@ -50,13 +51,11 @@ evidence, not silently relabeled as the final binary.
 
 ## Remaining release gates
 
-1. Run the defined Linux/macOS/Windows remote CI and artifact matrix after an
-   approved push. Python 3.10/3.12 are declared but not individually locally audited.
-2. Test a complete GH Python component graph, repeated recompute, cache cleanup
+1. Test a complete GH Python component graph, repeated recompute, cache cleanup
    and UI workflow on target Rhino versions. DataTree smoke does not close this gate.
-3. Evaluate representative lab jobs, CAD tessellation error, units and configured
+2. Evaluate representative lab jobs, CAD tessellation error, units and configured
    exclusions. Interactive HTML currently uses external CDN assets; CLI/JSON are offline.
-4. Before physical execution, obtain measured or valid bounds for tracking,
+3. Before physical execution, obtain measured or valid bounds for tracking,
    calibration, tool/workpiece geometry and controller interpolation; use the
    laboratory's independent safety system and supervised acceptance procedure.
 
@@ -67,7 +66,11 @@ are not covered. See [ROBUSTNESS.md](ROBUSTNESS.md) and
 [Persian review](REVIEW_FA_20261008.md). No known failing regression remains in
 the executed suite, but absence of all possible bugs cannot be established.
 
-## Publication procedure (not executed)
+## Historical publication procedure (now executed)
+
+Owner approval, commits, push, CI, tag, asset upload and prerelease publication
+are complete for the source in the publication record. Python 3.10/3.12 are
+declared but not individually audited in the four-interpreter release matrix.
 
 Review the complete diff and newly added files, keep historical manifests
 unchanged, select the approved release contents and commit only with approval.
